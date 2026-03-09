@@ -251,9 +251,9 @@ app.post('/investigation-proof', async (req: express.Request, res: express.Respo
       const tsNum = Number(timestamp);
       if (Number.isFinite(tsNum)) {
         // Reject replayed or future-dated timestamps (±5 min window)
-        const nowTs = Math.floor(Date.now() / 1000);
-        const ageTs = nowTs - tsNum;
-        if (ageTs > 300 || ageTs < -30) {
+        // Frontend sends ms, so we compare in ms
+        const age = Date.now() - tsNum;
+        if (age > 300000 || age < -30000) {
           return res.status(401).json({ error: 'Timestamp expired or too far in future (max ±5 min)' });
         }
         valid = await verifyMessage({
@@ -707,8 +707,8 @@ app.post('/role-commit-sync', async (req: express.Request, res: express.Response
       nonce,
       timestamp,
       chainId,
-      buildLegacyMessage: () => `role-sync:${roomId}:${(playerAddress as string).toLowerCase()}`,
-      buildModernMessage: (n, ts) => `role-sync:${roomId}:${(playerAddress as string).toLowerCase()}:${n}:${ts}`,
+      buildLegacyMessage: () => `sync-role-commit:${roomId}:${(txHash as string || '')}`,
+      buildModernMessage: (n, ts) => `sync-role-commit:${roomId}:${(txHash as string || '')}:${n}:${ts}`,
     });
     if (!signatureCheck.ok) {
       return res.status(signatureCheck.status).json({ error: signatureCheck.error });
