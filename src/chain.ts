@@ -7,11 +7,20 @@ import { defineChain } from 'viem';
 
 // ─── Chain ────────────────────────────────────────────────
 export const avalancheFuji = defineChain({
-  id: Number(process.env.CHAIN_ID || 43113),
-  name: process.env.CHAIN_NAME || 'Avalanche Fuji C-Chain',
+  id: 43113,
+  name: 'Avalanche Fuji C-Chain',
   nativeCurrency: { name: 'Avalanche', symbol: 'AVAX', decimals: 18 },
-  rpcUrls: { default: { http: [process.env.RPC_URL || 'https://api.avax-test.network/ext/bc/C/rpc'] } },
+  rpcUrls: { default: { http: [process.env.AVAX_RPC_URL || 'https://api.avax-test.network/ext/bc/C/rpc'] } },
   blockExplorers: { default: { name: 'Snowtrace', url: 'https://testnet.snowtrace.io' } },
+  testnet: true,
+});
+
+export const somniaTestnet = defineChain({
+  id: 50312,
+  name: 'Somnia Testnet',
+  nativeCurrency: { name: 'STT', symbol: 'STT', decimals: 18 },
+  rpcUrls: { default: { http: [process.env.SOMNIA_RPC_URL || 'https://dream-rpc.somnia.network/'] } },
+  blockExplorers: { default: { name: 'Explorer', url: 'https://shannon-explorer.somnia.network' } },
   testnet: true,
 });
 
@@ -130,23 +139,32 @@ export const DIAMOND_ABI = [
 ] as const;
 
 // ─── Clients ──────────────────────────────────────────────
-const DIAMOND_ADDRESS = (process.env.DIAMOND_ADDRESS || '0x3c1bd1923f8318247e2b60e41b0f280391c4e1e1') as Address;
-const RPC_URL = process.env.RPC_URL || 'https://api.avax-test.network/ext/bc/C/rpc';
-
+if (!process.env.GM_PRIVATE_KEY) {
+  throw new Error('FATAL: GM_PRIVATE_KEY is missing from environment variables');
+}
 const gmAccount = privateKeyToAccount(process.env.GM_PRIVATE_KEY as Hex);
-
-export const publicClient = createPublicClient({
-  chain: avalancheFuji,
-  transport: http(RPC_URL),
-});
-
-export const walletClient = createWalletClient({
-  account: gmAccount,
-  chain: avalancheFuji,
-  transport: http(RPC_URL),
-});
-
 export const GM_ADDRESS = gmAccount.address;
+
+const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x3c1bd1923f8318247e2b60e41b0f280391c4e1e1') as Address;
+const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0xb34f8430f8a755c8c1bdc9dd19f14e263fc3f6b1') as Address;
+
+const chainsConfig: Record<number, { public: any, wallet: any, diamond: Address }> = {
+  [avalancheFuji.id]: {
+    public: createPublicClient({ chain: avalancheFuji, transport: http(avalancheFuji.rpcUrls.default.http[0]) }),
+    wallet: createWalletClient({ account: gmAccount, chain: avalancheFuji, transport: http(avalancheFuji.rpcUrls.default.http[0]) }),
+    diamond: AVAX_DIAMOND
+  },
+  [somniaTestnet.id]: {
+    public: createPublicClient({ chain: somniaTestnet, transport: http(somniaTestnet.rpcUrls.default.http[0]) }),
+    wallet: createWalletClient({ account: gmAccount, chain: somniaTestnet, transport: http(somniaTestnet.rpcUrls.default.http[0]) }),
+    diamond: SOMNIA_DIAMOND
+  }
+};
+
+export function getChainConfig(chainId?: number) {
+  const config = chainsConfig[Number(chainId)] || chainsConfig[avalancheFuji.id]; // default to avax if unknown
+  return config;
+}
 
 // ─── Contract helpers ─────────────────────────────────────
 
@@ -190,64 +208,68 @@ export const ACTION_TO_ROLE: Record<string, number> = {
   check: Role.DETECTIVE,
 } as const;
 
-export async function getRoom(roomId: bigint) {
-  return publicClient.readContract({
-    address: DIAMOND_ADDRESS,
+export async function getRoom(roomId: bigint, chainId?: number) {
+  const { public: client, diamond } = getChainConfig(chainId);
+  return client.readContract({
+    address: diamond,
     abi: DIAMOND_ABI,
     functionName: 'getRoom',
     args: [roomId],
   });
 }
 
-export async function getPlayers(roomId: bigint) {
-  return publicClient.readContract({
-    address: DIAMOND_ADDRESS,
+export async function getPlayers(roomId: bigint, chainId?: number) {
+  const { public: client, diamond } = getChainConfig(chainId);
+  return client.readContract({
+    address: diamond,
     abi: DIAMOND_ABI,
     functionName: 'getPlayers',
     args: [roomId],
   });
 }
 
-export async function hasCommittedRole(roomId: bigint, player: Address): Promise<boolean> {
-  const players = await getPlayers(roomId);
+export async function hasCommittedRole(roomId: bigint, player: Address, chainId?: number): Promise<boolean> {
+  const players = await getPlayers(roomId, chainId);
   const p = players.find(
-    (pl) => pl.wallet.toLowerCase() === player.toLowerCase()
+    (pl: any) => pl.wallet.toLowerCase() === player.toLowerCase()
   );
   if (!p) return false;
   // FLAG_CONFIRMED_ROLE (0x1) is set when player calls commitAndConfirmRole() in ShuffleFacet
   return (Number(p.flags) & FLAGS.CONFIRMED_ROLE) !== 0;
 }
 
-export async function getSessionKey(mainWallet: Address) {
-  return publicClient.readContract({
-    address: DIAMOND_ADDRESS,
+export async function getSessionKey(mainWallet: Address, chainId?: number) {
+  const { public: client, diamond } = getChainConfig(chainId);
+  return client.readContract({
+    address: diamond,
     abi: DIAMOND_ABI,
     functionName: 'sessionKeys',
     args: [mainWallet],
   });
 }
 
-export async function resolveNight(roomId: bigint, killTarget: Address, healTarget: Address) {
-  const hash = await walletClient.writeContract({
-    address: DIAMOND_ADDRESS,
+export async function resolveNight(roomId: bigint, killTarget: Address, healTarget: Address, chainId?: number) {
+  const { wallet: client, public: publicClient, diamond } = getChainConfig(chainId);
+  const hash = await client.writeContract({
+    address: diamond,
     abi: DIAMOND_ABI,
     functionName: 'resolveNightAsGameMaster',
     args: [roomId, killTarget, healTarget],
   });
-  console.log(`[chain] resolveNightAsGameMaster tx: ${hash}`);
+  console.log(`[chain] resolveNightAsGameMaster tx: ${hash} on chainId ${chainId}`);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   console.log(`[chain] confirmed in block ${receipt.blockNumber}, status: ${receipt.status}`);
   return { hash, receipt };
 }
 
 export async function assertChainConfigOrThrow() {
-  const rpcChainId = await publicClient.getChainId();
-  if (rpcChainId !== avalancheFuji.id) {
-    throw new Error(
-      `[chain] Chain mismatch: expected ${avalancheFuji.id} (${avalancheFuji.name}), got ${rpcChainId}. ` +
-      `Check CHAIN_ID/RPC_URL in gm-server .env`
-    );
+  // Check both chains
+  for (const cid of [avalancheFuji.id, somniaTestnet.id]) {
+    const { public: client } = getChainConfig(cid);
+    const rpcChainId = await client.getChainId().catch(() => null);
+    if (!rpcChainId || rpcChainId !== cid) {
+      console.warn(`[chain] Warning: Chain ${cid} not responding correctly (got ${rpcChainId}). Check RPC_URL.`);
+    }
   }
 }
 
-export { DIAMOND_ADDRESS };

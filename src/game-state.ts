@@ -48,13 +48,20 @@ export function getAllNightStates(): Map<string, RoomNightState> {
   return nightStates;
 }
 
+/** Inject a pre-loaded night state (used during Redis startup restore). */
+export function injectNightState(roomId: bigint, state: RoomNightState): void {
+  nightStates.set(roomId.toString(), state);
+}
+
 // ─── Consensus logic ──────────────────────────────────────
 
 /**
  * Calculate mafia kill target by majority vote.
- * Returns address(0) if no consensus.
+ * @param actions - all night actions submitted
+ * @param totalAliveMafia - total alive mafia count (including AFK). If 0/undefined, falls back to voters count.
+ * Returns address(0) if no consensus or tie.
  */
-export function calculateMafiaConsensus(actions: NightAction[]): Address {
+export function calculateMafiaConsensus(actions: NightAction[], totalAliveMafia?: number): Address {
   const killActions = actions.filter((a) => a.actionType === 'kill');
   if (killActions.length === 0) return '0x0000000000000000000000000000000000000000';
 
@@ -65,20 +72,28 @@ export function calculateMafiaConsensus(actions: NightAction[]): Address {
     votes.set(target, (votes.get(target) || 0) + 1);
   }
 
-  // Find majority (> 50% of mafia members)
-  const threshold = Math.ceil(killActions.length / 2);
+  // Threshold: majority of total alive mafia (counting AFK).
+  // Falls back to majority of voters if total not known.
+  const mafiaSize = (totalAliveMafia && totalAliveMafia > 0) ? totalAliveMafia : killActions.length;
+  const threshold = Math.floor(mafiaSize / 2) + 1; // strict majority
+
+  // Find candidate with most votes
   let bestTarget = '0x0000000000000000000000000000000000000000';
   let bestCount = 0;
+  let tie = false;
 
   for (const [target, count] of votes) {
     if (count > bestCount) {
       bestCount = count;
       bestTarget = target;
+      tie = false;
+    } else if (count === bestCount) {
+      tie = true; // two candidates with equal top votes → no kill
     }
   }
 
-  // Need at least a plurality (most votes, ties = no kill)
-  if (bestCount >= threshold) {
+  // Require strict majority AND no tie
+  if (!tie && bestCount >= threshold) {
     return bestTarget as Address;
   }
 
