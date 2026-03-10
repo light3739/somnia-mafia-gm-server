@@ -1,0 +1,122 @@
+name: GM Deploy Dev
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify start (Telegram)
+        run: |
+          if [ -n "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] && [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+              -d text="🚀 GM dev deploy started: ${{ github.repository }} @ ${{ github.ref_name }} | ${{ github.sha }}"
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.GM_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          HOST="${{ secrets.MAFIATEST_SSH_HOST }}"
+          if [ -z "$HOST" ]; then HOST="${{ secrets.GM_SSH_HOST }}"; fi
+          PORT="${{ secrets.GM_SSH_PORT }}"
+          if [ -z "$PORT" ]; then PORT=22; fi
+          ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Sync gm-server to test server
+        env:
+          SSH_HOST: ${{ secrets.MAFIATEST_SSH_HOST }}
+          SSH_USER: ${{ secrets.GM_SSH_USER }}
+          SSH_PORT: ${{ secrets.GM_SSH_PORT }}
+        run: |
+          HOST="${SSH_HOST}"
+          if [ -z "$HOST" ]; then HOST="${{ secrets.GM_SSH_HOST }}"; fi
+          USER="${SSH_USER:-root}"
+          PORT="${SSH_PORT:-22}"
+          REMOTE_DIR="/root/mafia-dev/gm-server"
+          FRONTEND_COMPOSE_DIR="/root/mafia-dev/frontend/ops/frontend-server"
+
+          echo "[gm-dev:deploy] Syncing to ${USER}@${HOST}:${REMOTE_DIR}"
+          ssh -p "$PORT" "${USER}@${HOST}" "mkdir -p '$REMOTE_DIR'"
+
+          tar -cz \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            -C . . \
+          | ssh -p "$PORT" "${USER}@${HOST}" "tar -xz -C '$REMOTE_DIR'"
+
+          echo "[gm-dev:deploy] Validating .env on remote"
+          ssh -p "$PORT" "${USER}@${HOST}" "
+            set -euo pipefail
+
+            if [ ! -f '$REMOTE_DIR/.env' ]; then
+              echo '[gm-dev:deploy] ERROR: $REMOTE_DIR/.env not found'
+              echo '[gm-dev:deploy] Create it manually with GM_PRIVATE_KEY and other required vars'
+              exit 1
+            fi
+
+            KEY=\"\$(grep -E '^GM_PRIVATE_KEY=' '$REMOTE_DIR/.env' | head -n1 | cut -d= -f2- || true)\"
+            if [ -z \"\$KEY\" ]; then
+              echo '[gm-dev:deploy] ERROR: GM_PRIVATE_KEY is missing in .env'
+              exit 1
+            fi
+          "
+
+          echo "[gm-dev:deploy] Rebuilding gm-server container"
+          DEPLOY_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+          DEPLOY_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+          ssh -p "$PORT" "${USER}@${HOST}" "
+            set -euo pipefail
+            cd '$FRONTEND_COMPOSE_DIR'
+
+            if [ ! -f docker-compose.dev.yaml ]; then
+              echo '[gm-dev:deploy] ERROR: docker-compose.dev.yaml not found at $FRONTEND_COMPOSE_DIR'
+              echo '[gm-dev:deploy] Make sure frontend was deployed first (dev branch push)'
+              exit 1
+            fi
+
+            docker compose --project-name mafia-dev -f docker-compose.dev.yaml up -d --build gm-server
+
+            echo '[gm-dev:deploy] Current containers:'
+            docker compose --project-name mafia-dev -f docker-compose.dev.yaml ps
+
+            # Telegram notification from server (has bot token in env)
+            ENV_FILE=/etc/mafia-monitor.env
+            if [ -f \"\$ENV_FILE\" ]; then . \"\$ENV_FILE\"; fi
+            BOT_TOKEN=\"\${TELEGRAM_BOT_TOKEN:-}\"
+            CHAT_ID=\"\${TELEGRAM_CHAT_ID:-}\"
+            if [ -n \"\$BOT_TOKEN\" ] && [ -n \"\$CHAT_ID\" ]; then
+              curl -sS -X POST \"https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\" \
+                -d \"chat_id=\${CHAT_ID}\" \
+                --data-urlencode \"text=🧪 GM-server TEST deployed\nBranch: $DEPLOY_BRANCH\nCommit: $DEPLOY_SHA\nURL: https://gm-test.mafiaonchain.live/health\" \
+                >/dev/null || true
+            fi
+          "
+
+      - name: Notify success (Telegram)
+        if: success()
+        run: |
+          if [ -n "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] && [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+              -d text="✅ GM dev deploy success: ${{ github.repository }} @ ${{ github.ref_name }} | https://gm-test.mafiaonchain.live/health"
+          fi
+
+      - name: Notify failure (Telegram)
+        if: failure()
+        run: |
+          if [ -n "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] && [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+              -d text="❌ GM dev deploy FAILED: ${{ github.repository }} @ ${{ github.ref_name }} | run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi
