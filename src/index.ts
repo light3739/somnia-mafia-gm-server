@@ -1,6 +1,6 @@
 /**
  * index.ts - GM Server Main Entry
- * (Testing CI with GitHub Secrets now)
+ * (Final CI check after fixing remote .env)
  */
 import express from 'express';
 import cors from 'cors';
