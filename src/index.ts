@@ -1,3 +1,7 @@
+/**
+ * index.ts - GM Server Main Entry
+ * (Triggering CI test deploy)
+ */
 import express from 'express';
 import cors from 'cors';
 import { verifyMessage, type Address } from 'viem';
