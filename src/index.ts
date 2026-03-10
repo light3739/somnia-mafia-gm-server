@@ -1,6 +1,6 @@
 /**
  * index.ts - GM Server Main Entry
- * (Triggering CI test deploy)
+ * (Testing CI with GitHub Secrets now)
  */
 import express from 'express';
 import cors from 'cors';
