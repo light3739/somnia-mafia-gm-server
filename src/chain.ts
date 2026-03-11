@@ -136,6 +136,13 @@ export const DIAMOND_ABI = [
       { name: 'healTarget', type: 'address', indexed: false },
     ],
   },
+  {
+    type: 'function',
+    name: 'getDeck',
+    inputs: [{ name: 'roomId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'string[]' }],
+    stateMutability: 'view',
+  },
 ] as const;
 
 // ─── Clients ──────────────────────────────────────────────
