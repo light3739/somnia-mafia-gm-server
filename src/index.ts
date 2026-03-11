@@ -597,7 +597,7 @@ app.post('/night-action', async (req: express.Request, res: express.Response) =>
 // Useful if they lost their local state (salt) or just want to wait.
 app.post('/skip-night-action', async (req: express.Request, res: express.Response) => {
   try {
-    const { roomId, playerAddress, signature, signerAddress, nonce, timestamp, chainId } = req.body;
+    const { roomId, playerAddress, signature, signerAddress, nonce, timestamp, chainId, dayCount } = req.body;
     if (!roomId || !playerAddress || !signature) {
       return res.status(400).json({ error: 'Missing fields' });
     }
@@ -612,7 +612,7 @@ app.post('/skip-night-action', async (req: express.Request, res: express.Respons
       timestamp,
       chainId,
       buildLegacyMessage: () => `skip-night:${roomId}`,
-      buildModernMessage: (n, ts) => `skip-night:${roomId}:${n}:${ts}`,
+      buildModernMessage: (n, ts) => `skip-night:${roomId}:${dayCount || 0}:${n}:${ts}`,
     });
 
     if (!signatureCheck.ok) {
