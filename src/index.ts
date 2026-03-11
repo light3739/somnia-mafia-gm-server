@@ -313,7 +313,7 @@ app.post('/investigation-proof', async (req: express.Request, res: express.Respo
 
     // Role discovery for detective proof
     const roomRoles = resolvedRoles.get(String(rid));
-    const targetRole = roomRoles?.get(target.toLowerCase()) || 'UNKNOWN';
+    const targetRole = roomRoles?.get(target.toLowerCase()) || null;
 
     return res.json({ 
       ok: true, 
