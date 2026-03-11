@@ -850,30 +850,48 @@ app.get('/room/:roomId', async (req: express.Request, res: express.Response) => 
 });
 
 // ─── Register ECIES Public Key ────────────────────────────
-// Players register their P-256 pubkey so GM can encrypt their role privately.
-// No auth required — pubkeys are not secret.
 app.post('/register-pubkey', async (req: express.Request, res: express.Response) => {
-  const { roomId, playerAddress, pubkey, chainId } = req.body;
-  if (!roomId || !playerAddress || !pubkey) {
-    return res.status(400).json({ error: 'Missing: roomId, playerAddress, pubkey' });
+  const { roomId, playerAddress, pubkey, signature, signerAddress, nonce, timestamp, chainId } = req.body;
+  
+  if (!roomId || !playerAddress || !pubkey || !signature) {
+    return res.status(400).json({ error: 'Missing req fields: roomId, playerAddress, pubkey, signature' });
   }
+
   // Validate: 65-byte uncompressed P-256 point starts with "04", followed by 128 hex chars
   if (!/^04[0-9a-fA-F]{128}$/.test(pubkey)) {
     return res.status(400).json({ error: 'Invalid pubkey: expected 65-byte uncompressed P-256 hex (starting with 04)' });
+  }
+
+  const normalizedAddr = String(playerAddress).toLowerCase();
+
+  const signatureCheck = await verifyAuthorizedSignature({
+    roomId: String(roomId),
+    signature: signature as `0x${string}`,
+    playerAddress: normalizedAddr,
+    signerAddress,
+    nonce,
+    timestamp,
+    chainId,
+    buildLegacyMessage: () => `register-pubkey:${roomId}:${normalizedAddr}:${pubkey}`,
+    buildModernMessage: (n, ts) => `register-pubkey:${roomId}:${normalizedAddr}:${pubkey}:${n}:${ts}`,
+  });
+
+  if (!signatureCheck.ok) {
+    return res.status(signatureCheck.status || 401).json({ error: signatureCheck.error });
   }
 
   // Phase check: only allowed during REVEAL or ENDED (to allow reconnects)
   try {
     const room: any = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
     const phase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
-    if (phase !== GamePhase.REVEAL && phase !== GamePhase.ENDED) {
-      return res.status(400).json({ error: `Cannot register pubkey outside REVEAL phase (current: ${phase})` });
+    if (phase !== GamePhase.REVEAL && phase !== GamePhase.ENDED && phase !== GamePhase.LOBBY) {
+      // Allow LOBBY too just in case they generate early, but usually REVEAL
+      return res.status(400).json({ error: `Cannot register pubkey outside REVEAL/LOBBY phase (current: ${phase})` });
     }
   } catch (e: any) {
     console.warn(`[register-pubkey] Phase check failed for room ${roomId}: ${e.message}`);
   }
 
-  const normalizedAddr = String(playerAddress).toLowerCase();
   getRoomMap(eciesPubkeys, String(roomId)).set(normalizedAddr, pubkey);
   rPersistPubkey(getRedis(), String(roomId), normalizedAddr, pubkey);
   console.log(`[ecies] Room ${roomId}: pubkey registered for ${playerAddress}`);
@@ -1202,6 +1220,79 @@ app.get('/room-roles/:roomId', async (req: express.Request, res: express.Respons
   } catch (err: any) {
     console.error('[room-roles] Error computing on-demand:', err.message);
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Win Check ────────────────────────────────────────────────
+// The GM is the source of truth for all unrevealed roles.
+// Returns the current mafia vs town count to trigger end-game ZK proof.
+app.get('/win-check/:roomId', async (req: express.Request, res: express.Response) => {
+  try {
+    const roomId = req.params.roomId;
+    const chainIdNum = req.query.chainId ? Number(req.query.chainId) : undefined;
+    const rid = BigInt(roomId);
+
+    const [room, players] = await Promise.all([
+      getRoom(rid, chainIdNum),
+      getPlayers(rid, chainIdNum),
+    ]);
+
+    const phase = Array.isArray(room) ? Number(room[3]) : Number((room as any).phase);
+    if (phase === 0 || phase === GamePhase.ENDED) {
+      return res.json({ winDetected: false, phase, message: 'Game not in active phase or already ended' });
+    }
+
+    const cachedRoles = resolvedRoles.get(String(roomId));
+    if (!cachedRoles || cachedRoles.size === 0) {
+      return res.json({ winDetected: false, message: 'Waiting for roles to be resolved' });
+    }
+
+    let mafiaCount = 0;
+    let townCount = 0;
+    let missingSecrets = 0;
+
+    for (const p of players) {
+      const active = !!(Number(p.flags) & FLAGS.ACTIVE);
+      if (active) {
+        const _role = cachedRoles.get(p.wallet.toLowerCase());
+        if (!_role) {
+          missingSecrets++;
+        } else if (_role === 'MAFIA') {
+          mafiaCount++;
+        } else {
+          townCount++;
+        }
+      }
+    }
+
+    if (missingSecrets > 0) {
+      console.log(`[win-check] Room ${roomId}: MISSING SECRETS for ${missingSecrets} active players.`);
+    }
+
+    let result = null;
+    if (missingSecrets === 0) {
+      if (mafiaCount === 0) result = 'TOWN_WIN';
+      else if (mafiaCount >= townCount) result = 'MAFIA_WIN';
+    } else {
+      // Even with missing secrets, mafia wins if they outnumber total possible town
+      if (mafiaCount > 0 && mafiaCount >= townCount + missingSecrets) {
+        result = 'MAFIA_WIN';
+      }
+    }
+
+    if (result) {
+      return res.json({
+        winDetected: true,
+        result,
+        mafiaCount,
+        townCount
+      });
+    }
+
+    return res.json({ winDetected: false, message: 'Game continues' });
+  } catch (e: any) {
+    console.error(`[win-check] Error in room ${req.params.roomId}:`, e);
+    return res.status(500).json({ error: e.message || 'CheckWin failed' });
   }
 });
 
