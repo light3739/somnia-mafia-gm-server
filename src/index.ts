@@ -311,7 +311,17 @@ app.post('/investigation-proof', async (req: express.Request, res: express.Respo
       return res.status(403).json({ error: 'Investigation target mismatch' });
     }
 
-    return res.json({ ok: true, source: 'gm-proof', targetAddress: proof.targetAddress, timestamp: proof.timestamp });
+    // Role discovery for detective proof
+    const roomRoles = resolvedRoles.get(String(rid));
+    const targetRole = roomRoles?.get(target.toLowerCase()) || 'UNKNOWN';
+
+    return res.json({ 
+      ok: true, 
+      source: 'gm-proof', 
+      targetAddress: proof.targetAddress, 
+      role: targetRole,
+      timestamp: proof.timestamp 
+    });
   } catch (err: any) {
     console.error('[investigation-proof] Error:', err.message);
     return res.status(500).json({ error: err.message || 'Investigation proof check failed' });
@@ -578,6 +588,70 @@ app.post('/night-action', async (req: express.Request, res: express.Response) =>
     });
   } catch (err: any) {
     console.error('[night-action] Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Skip Night Action ────────────────────────────────────
+// Allows a player to explicitly "pass" their turn.
+// Useful if they lost their local state (salt) or just want to wait.
+app.post('/skip-night-action', async (req: express.Request, res: express.Response) => {
+  try {
+    const { roomId, playerAddress, signature, signerAddress, nonce, timestamp, chainId } = req.body;
+    if (!roomId || !playerAddress || !signature) {
+      return res.status(400).json({ error: 'Missing fields' });
+    }
+
+    const rid = BigInt(roomId);
+    const signatureCheck = await verifyAuthorizedSignature({
+      roomId: String(roomId),
+      signature: signature as `0x${string}`,
+      playerAddress: String(playerAddress),
+      signerAddress,
+      nonce,
+      timestamp,
+      chainId,
+      buildLegacyMessage: () => `skip-night:${roomId}`,
+      buildModernMessage: (n, ts) => `skip-night:${roomId}:${n}:${ts}`,
+    });
+
+    if (!signatureCheck.ok) {
+      return res.status(signatureCheck.status).json({ error: signatureCheck.error });
+    }
+
+    // Verify phase
+    const room: any = await getRoom(rid, chainId);
+    const phase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
+    if (phase !== GamePhase.NIGHT) {
+      return res.status(400).json({ error: 'Room is not in NIGHT phase' });
+    }
+
+    const state = getOrCreateNightState(rid);
+    if (state.resolved) return res.status(400).json({ error: 'Night already resolved' });
+
+    // Mark as "None" action (effectively a pass)
+    const action: NightAction = {
+      playerAddress: playerAddress as Address,
+      actionType: 'none' as any,
+      targetAddress: '0x0000000000000000000000000000000000000000',
+      timestamp: Date.now(),
+    };
+
+    state.actions.set((playerAddress as string).toLowerCase(), action);
+    rPersistNightState(getRedis(), String(roomId), state);
+
+    console.log(`[night] Room ${roomId}: ${playerAddress} skipped action`);
+
+    // Check for auto-resolve
+    const players = await getPlayers(rid, chainId);
+    const alivePlayers = players.filter((p: any) => !!(Number(p.flags) & FLAGS.ACTIVE));
+    if (allRolePlayersActed(String(roomId), alivePlayers)) {
+      doResolveNight(rid, chainId).catch(e => console.error(`[night] auto-resolve error: ${e.message}`));
+    }
+
+    return res.json({ ok: true });
+  } catch (err: any) {
+    console.error('[skip-night-action] Error:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
