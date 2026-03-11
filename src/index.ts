@@ -61,6 +61,8 @@ const eciesPubkeys = new Map<string, Map<string, string>>();
 const sraSKeys = new Map<string, Map<string, string>>();
 // Per room: player address → ECIES-resolved role (cached after all SRA keys collected)
 const resolvedRoles = new Map<string, Map<string, string>>();
+// Per room: stable player order (address[] in join order) — cached on first use or restored during role computation
+const roomPlayerOrder = new Map<string, string[]>();
 
 function getRoomMap<V>(map: Map<string, Map<string, V>>, roomId: string): Map<string, V> {
   let m = map.get(roomId);
@@ -776,8 +778,8 @@ app.get('/room/:roomId', async (req: express.Request, res: express.Response) => 
 // ─── Register ECIES Public Key ────────────────────────────
 // Players register their P-256 pubkey so GM can encrypt their role privately.
 // No auth required — pubkeys are not secret.
-app.post('/register-pubkey', (req: express.Request, res: express.Response) => {
-  const { roomId, playerAddress, pubkey } = req.body;
+app.post('/register-pubkey', async (req: express.Request, res: express.Response) => {
+  const { roomId, playerAddress, pubkey, chainId } = req.body;
   if (!roomId || !playerAddress || !pubkey) {
     return res.status(400).json({ error: 'Missing: roomId, playerAddress, pubkey' });
   }
@@ -785,6 +787,18 @@ app.post('/register-pubkey', (req: express.Request, res: express.Response) => {
   if (!/^04[0-9a-fA-F]{128}$/.test(pubkey)) {
     return res.status(400).json({ error: 'Invalid pubkey: expected 65-byte uncompressed P-256 hex (starting with 04)' });
   }
+
+  // Phase check: only allowed during REVEAL or ENDED (to allow reconnects)
+  try {
+    const room: any = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
+    const phase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
+    if (phase !== GamePhase.REVEAL && phase !== GamePhase.ENDED) {
+      return res.status(400).json({ error: `Cannot register pubkey outside REVEAL phase (current: ${phase})` });
+    }
+  } catch (e: any) {
+    console.warn(`[register-pubkey] Phase check failed for room ${roomId}: ${e.message}`);
+  }
+
   const normalizedAddr = String(playerAddress).toLowerCase();
   getRoomMap(eciesPubkeys, String(roomId)).set(normalizedAddr, pubkey);
   rPersistPubkey(getRedis(), String(roomId), normalizedAddr, pubkey);
@@ -823,6 +837,17 @@ app.post('/submit-sra-key', async (req: express.Request, res: express.Response) 
       return res.status(signatureCheck.status).json({ error: signatureCheck.error });
     }
 
+    // Phase check
+    try {
+      const room: any = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
+      const phase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
+      if (phase !== GamePhase.REVEAL && phase !== GamePhase.ENDED) {
+        return res.status(400).json({ error: `Cannot submit SRA key outside REVEAL phase (current: ${phase})` });
+      }
+    } catch (e: any) {
+      console.warn(`[submit-sra-key] Phase check failed for room ${roomId}: ${e.message}`);
+    }
+
     const roomSraKeys = getRoomMap(sraSKeys, String(roomId));
     const normalizedPlayer = String(playerAddress).toLowerCase();
     roomSraKeys.set(normalizedPlayer, String(sraKey));
@@ -847,17 +872,25 @@ app.post('/submit-sra-key', async (req: express.Request, res: express.Response) 
           functionName: 'getDeck',
           args: [rid],
         }) as string[];
-        // Apply ALL collected keys (including from inactive players who submitted before being kicked)
-        const allCollectedKeys = (players as any[])
+        // Use STABLE player order for deck index mapping — positions must be locked across the game
+        const roomKey = String(roomId);
+        let stableOrder = roomPlayerOrder.get(roomKey);
+        if (!stableOrder) {
+          stableOrder = players.map((p: any) => p.wallet.toLowerCase());
+          roomPlayerOrder.set(roomKey, stableOrder);
+          console.log(`[deck] Room ${roomId}: player order locked in (${stableOrder.length} players)`);
+        }
+
+        const allCollectedKeys = players
           .map((p: any) => roomSraKeys.get(p.wallet.toLowerCase()))
           .filter(Boolean) as string[];
-        const roomRoles = getRoomMap(resolvedRoles, String(roomId));
-        // Use ALL players for deck index mapping — positions are stable across the game
-        (players as any[]).forEach((p: any, i: number) => {
+
+        const roomRoles = getRoomMap(resolvedRoles, roomKey);
+        stableOrder.forEach((addr, i) => {
           if (i < deck.length) {
             const role = roleFromCardValue(sraDecryptCard(deck[i], allCollectedKeys), Number(roomId));
-            roomRoles.set(p.wallet.toLowerCase(), role);
-            rPersistRole(getRedis(), String(roomId), p.wallet.toLowerCase(), role);
+            roomRoles.set(addr, role);
+            rPersistRole(getRedis(), roomKey, addr, role);
           }
         });
         console.log(`[ecies] Room ${roomId}: all ${activeAddrs.length} active SRA keys collected — roles cached`);
@@ -922,9 +955,17 @@ app.get('/my-role/:roomId', async (req: express.Request, res: express.Response) 
 
     // Get players from chain to find this player's deck index
     const players = await getPlayers(rid, chainIdNum) as any[];
-    const playerIndex = players.findIndex((p: any) => p.wallet.toLowerCase() === normalizedPlayer);
+    
+    // Check stable order
+    const roomKey = String(roomId);
+    let stableOrder = roomPlayerOrder.get(roomKey);
+    if (!stableOrder) {
+      stableOrder = players.map((p: any) => p.wallet.toLowerCase());
+      roomPlayerOrder.set(roomKey, stableOrder);
+    }
+    const playerIndex = stableOrder.indexOf(normalizedPlayer);
     if (playerIndex === -1) {
-      return res.status(404).json({ error: 'Player not found in room' });
+      return res.status(404).json({ error: 'Player not found in room order' });
     }
 
     // Only require ACTIVE players' SRA keys (kicked players may be missing theirs)
@@ -1123,6 +1164,51 @@ async function start() {
           nightTimers.set(roomIdStr, t);
           console.log(`[startup] Room ${roomIdStr}: night in progress — timeout in ${remaining}ms`);
         }
+      }
+
+      // Recompute roles for rooms where SRA keys were restored but roles weren't
+      for (const [roomId, keyMap] of sraSKeys) {
+        const existingRoles = resolvedRoles.get(roomId);
+        if (existingRoles && existingRoles.size > 0) continue; // already in Redis
+
+        console.log(`[startup] Room ${roomId}: ${keyMap.size} SRA keys found, roles missing — scheduling recompute`);
+        // Trigger async recompute (non-blocking, best-effort)
+        (async () => {
+          try {
+            const rid = BigInt(roomId);
+            const players = await getPlayers(rid) as any[];
+            // Identify active players
+            const activePlayers = players.filter((p: any) => (Number(p.flags) & FLAGS.ACTIVE) !== 0);
+            const activeAddrs = activePlayers.map((p: any) => p.wallet.toLowerCase());
+            const missingKeys = activeAddrs.filter((addr: string) => !keyMap.has(addr));
+            if (missingKeys.length > 0) return; // not all keys yet — /my-role slow path will handle it
+
+            const { public: publicClient, diamond } = getChainConfig();
+            const deck = await publicClient.readContract({
+              address: diamond,
+              abi: DIAMOND_ABI,
+              functionName: 'getDeck',
+              args: [rid],
+            }) as string[];
+
+            // Restore stable order during recompute
+            const order = players.map((p: any) => p.wallet.toLowerCase());
+            roomPlayerOrder.set(roomId, order);
+
+            const allKeys = players.map((p: any) => keyMap.get(p.wallet.toLowerCase())).filter(Boolean) as string[];
+            const roomRoles = getRoomMap(resolvedRoles, roomId);
+            order.forEach((addr, i) => {
+              if (i < deck.length) {
+                const role = roleFromCardValue(sraDecryptCard(deck[i], allKeys), Number(roomId));
+                roomRoles.set(addr, role);
+                rPersistRole(getRedis(), roomId, addr, role);
+              }
+            });
+            console.log(`[startup] Room ${roomId}: roles recomputed (${roomRoles.size} players)`);
+          } catch (e: any) {
+            console.warn(`[startup] Room ${roomId}: role recompute failed: ${e.message}`);
+          }
+        })();
       }
     }
     app.listen(PORT, '0.0.0.0', () => {
