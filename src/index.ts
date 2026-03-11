@@ -1148,7 +1148,12 @@ app.get('/room-roles/:roomId', async (req: express.Request, res: express.Respons
       }
     }
 
-    if (phase !== GamePhase.ENDED && !isVerifiedMafia) {
+    const phaseDeadline = Number(Array.isArray(room) ? room[10] : (room.phaseDeadline || 0));
+    const nowSec = Math.floor(Date.now() / 1000);
+    // Allow if game ended OR if deadline was > 30s ago (game likely over, chain lag)
+    const likelyEnded = phase === GamePhase.ENDED || (phaseDeadline > 0 && nowSec > phaseDeadline + 30);
+
+    if (!likelyEnded && !isVerifiedMafia) {
       return res.status(403).json({ error: `Roles are only public after the game ends. Current phase: ${phase}` });
     }
 
