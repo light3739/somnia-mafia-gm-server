@@ -19,7 +19,7 @@ async function initPoseidon() {
 export async function calculatePoseidon(inputs: any[]): Promise<string> {
     await initPoseidon();
     const hash = poseidon(inputs.map(i => BigInt(i)));
-    return F.toString(hash);
+    return "0x" + F.toString(hash, 16).padStart(64, '0');
 }
 
 export async function generateEndGameProof(roomId: string, players: any[]) {
