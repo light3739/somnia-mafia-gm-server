@@ -6,6 +6,22 @@ import path from "path";
 const WASM = path.join(process.cwd(), "zk/mafia_outcome.wasm");
 const ZKEY = path.join(process.cwd(), "zk/mafia_outcome_final.zkey");
 
+let poseidon: any;
+let F: any;
+
+async function initPoseidon() {
+    if (!poseidon) {
+        poseidon = await buildPoseidon();
+        F = poseidon.F;
+    }
+}
+
+export async function calculatePoseidon(inputs: any[]): Promise<string> {
+    await initPoseidon();
+    const hash = poseidon(inputs.map(i => BigInt(i)));
+    return F.toString(hash);
+}
+
 export async function generateEndGameProof(roomId: string, players: any[]) {
     const N = 16;
     const padded = [...players];

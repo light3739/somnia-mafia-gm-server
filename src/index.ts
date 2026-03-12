@@ -42,7 +42,7 @@ import {
   loadAllState,
 } from './redis.js';
 import { ServerStore } from './services/serverStore.js';
-import { generateEndGameProof } from './zk.js';
+import { generateEndGameProof, calculatePoseidon } from './zk.js';
 import { Mutex } from 'async-mutex';
 
 const zkMutex = new Mutex();
@@ -56,6 +56,26 @@ const ALLOWED_ORIGINS = [
 const app = express();
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
+
+// ─── ZK Hash Service ────────────────────────────
+// Used by frontend to generate Poseidon commitments without ZK libs
+app.post('/hash-role', async (req, res) => {
+  try {
+    const { role, salt } = req.body;
+    if (role === undefined || !salt) return res.status(400).json({ error: "Missing role or salt" });
+
+    // CIRCUIT EXPECTS: Mafia=1, Town=0
+    // We map roles {2, 3, 4} to 0 for ZK compatibility
+    const mappedRole = (Number(role) === 1) ? 1 : 0;
+    const cleanSalt = salt.startsWith('0x') ? salt.slice(2) : salt;
+    const saltBigInt = BigInt("0x" + cleanSalt);
+
+    const commitment = await calculatePoseidon([BigInt(mappedRole), saltBigInt]);
+    res.json({ commitment });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 const PORT = Number(process.env.PORT) || 3001;
 
@@ -1397,9 +1417,6 @@ async function start() {
   }
 }
 
-void start();
-
-
 // ─── End Game ZK Proof (Move from Frontend) ──────────────
 app.post('/end-game-zk/:roomId', async (req: express.Request, res: express.Response) => {
   try {
@@ -1445,3 +1462,5 @@ app.post('/end-game-zk/:roomId', async (req: express.Request, res: express.Respo
     res.status(500).json({ error: err.message || 'Failed to generate ZK proof' });
   }
 });
+
+void start();
