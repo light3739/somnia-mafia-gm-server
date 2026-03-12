@@ -17,6 +17,9 @@ export async function generateEndGameProof(roomId: string, players: any[]) {
     const mafiaCount = padded.filter(p => p.isActive === 1 && p.role === 1).length;
     const townCount  = padded.filter(p => p.isActive === 1 && p.role === 0).length;
 
+    console.log(`[ZK] Starting proof generation for room ${roomId}...`);
+    const start = Date.now();
+
     const { proof, publicSignals } = await snarkjs.groth16.fullProve({
         roomId: BigInt(roomId).toString(),
         mafiaCount: mafiaCount.toString(),
@@ -28,6 +31,9 @@ export async function generateEndGameProof(roomId: string, players: any[]) {
             BigInt("0x" + p.salt.replace("0x","")).toString()
         ),
     }, WASM, ZKEY);
+
+    const duration = Date.now() - start;
+    console.log(`[ZK] Proof generated successfully for room ${roomId} in ${duration}ms`);
 
     return snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
 }

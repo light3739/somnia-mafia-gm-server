@@ -43,6 +43,9 @@ import {
 } from './redis.js';
 import { ServerStore } from './services/serverStore.js';
 import { generateEndGameProof } from './zk.js';
+import { Mutex } from 'async-mutex';
+
+const zkMutex = new Mutex();
 
 const ALLOWED_ORIGINS = [
   'https://mafiaonchain.live',
@@ -1432,7 +1435,9 @@ app.post('/end-game-zk/:roomId', async (req: express.Request, res: express.Respo
         };
     });
 
-    const callData = await generateEndGameProof(roomId, zkPlayers);
+    const callData = await zkMutex.runExclusive(async () => {
+        return generateEndGameProof(roomId, zkPlayers);
+    });
     console.log(`[ZK] Proof generated successfully for Room #${roomId}`);
     res.json({ callData });
   } catch (err: any) {
