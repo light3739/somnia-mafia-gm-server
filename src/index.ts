@@ -41,6 +41,8 @@ import {
   rDeleteNightState,
   loadAllState,
 } from './redis.js';
+import { ServerStore } from './services/serverStore.js';
+import { generateEndGameProof } from './zk.js';
 
 const ALLOWED_ORIGINS = [
   'https://mafiaonchain.live',
@@ -1393,3 +1395,48 @@ async function start() {
 }
 
 void start();
+
+
+// ─── End Game ZK Proof (Move from Frontend) ──────────────
+app.post('/end-game-zk/:roomId', async (req: express.Request, res: express.Response) => {
+  try {
+    const { roomId } = req.params;
+    const { chainId } = req.body; // allow passing chainId if needed
+    const rid = BigInt(roomId);
+
+    console.log(`[ZK] Generating end-game proof for Room #${roomId}`);
+
+    const secrets = await ServerStore.getRoomSecrets(roomId);
+    if (!secrets) {
+        return res.status(400).json({ error: "No secrets for room" });
+    }
+
+    const players = await getPlayers(rid, chainId);
+    const zkPlayers = players.map((p: any) => {
+        const addr = p.wallet.toLowerCase();
+        const secret = secrets[addr];
+        const isAlive = (Number(p.flags) & FLAGS.ACTIVE) !== 0;
+
+        if (isAlive && !secret?.salt) {
+            console.error(`[ZK] Missing salt for alive player ${addr}`);
+            // Don't throw if we can't find it for some reason? 
+            // Better to throw so we don't generate invalid proof.
+            throw new Error(`Missing salt for alive player ${addr}`);
+        }
+
+        return {
+            role:       secret?.role === 1 ? 1 : 0,
+            salt:       (isAlive && secret) ? secret.salt : "0".repeat(64),
+            commitment: (isAlive && secret) ? secret.commitment : "0",
+            isActive:   isAlive ? 1 : 0,
+        };
+    });
+
+    const callData = await generateEndGameProof(roomId, zkPlayers);
+    console.log(`[ZK] Proof generated successfully for Room #${roomId}`);
+    res.json({ callData });
+  } catch (err: any) {
+    console.error(`[ZK] Error generating proof: ${err.message}`);
+    res.status(500).json({ error: err.message || 'Failed to generate ZK proof' });
+  }
+});
