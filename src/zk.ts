@@ -24,7 +24,7 @@ export async function calculatePoseidon(inputs: any[]): Promise<string> {
 
 export async function generateEndGameProof(roomId: string, players: any[]) {
     const N = 16;
-    const padded = [...players];
+    const padded = players.slice(0, N);
     while (padded.length < N) {
         // Use consistent padding values that won't interfere with the circuit logic
         padded.push({ role: 0, salt: "0".repeat(64), commitment: "0", isActive: 0 });
