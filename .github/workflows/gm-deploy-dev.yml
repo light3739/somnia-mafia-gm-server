@@ -44,15 +44,16 @@ jobs:
           REMOTE_DIR="/root/mafia-dev/gm-server"
           FRONTEND_COMPOSE_DIR="/root/mafia-dev/frontend/ops/frontend-server"
 
-          echo "[gm-dev:deploy] Syncing to ${USER}@${HOST}:${REMOTE_DIR}"
+          echo "[gm-dev:deploy] Packaging and uploading gm-server to ${USER}@${HOST}:${REMOTE_DIR}"
           ssh -p "$PORT" "${USER}@${HOST}" "mkdir -p '$REMOTE_DIR'"
 
-          tar -cz \
-            --exclude='.git' \
-            --exclude='node_modules' \
-            --exclude='dist' \
-            -C . . \
-          | ssh -p "$PORT" "${USER}@${HOST}" "tar -xz -C '$REMOTE_DIR'"
+          # Create a tarball in /tmp to avoid "file changed as we read it" error
+          tar -czf /tmp/gm-server.tar.gz --exclude='.git' --exclude='node_modules' --exclude='dist' .
+          
+          scp -P "$PORT" /tmp/gm-server.tar.gz "${USER}@${HOST}:${REMOTE_DIR}/"
+
+          echo "[gm-dev:deploy] Extracting on remote"
+          ssh -p "$PORT" "${USER}@${HOST}" "cd '$REMOTE_DIR' && tar -xzf gm-server.tar.gz && rm gm-server.tar.gz"
 
           echo "[gm-dev:deploy] Validating .env on remote"
           ssh -p "$PORT" "${USER}@${HOST}" "
