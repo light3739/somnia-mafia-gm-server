@@ -119,15 +119,7 @@ PORT=3001
 
 ---
 
-## Deployment
-
-The GM server is deployed as a Docker container alongside the frontend. From the frontend monorepo:
-
-```bash
-npm run gm:sync     # Sync source into ops/gm-server/source
-npm run gm:build    # Build in workdir
-npm run gm:publish  # Push to this GitHub repo
-npm run gm:deploy   # SSH deploy to production server
-# or all at once:
-npm run gm:release
-```
+The GM server is deployed as a Docker container authenticated via GHCR.
+The CI/CD pipeline is fully automated via GitHub Actions:
+1. Build & Push to GHCR
+2. Pull and restart on remote server
