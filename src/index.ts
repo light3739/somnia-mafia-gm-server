@@ -4,6 +4,7 @@
  */
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { verifyMessage, type Address } from 'viem';
 import {
   getRoom,
@@ -54,6 +55,43 @@ const ALLOWED_ORIGINS = [
 ];
 
 const app = express();
+
+// ─── Rate Limiting ──────────────────────────────────────────────────────────
+//
+// We use THREE different limiters to avoid blocking legitimate gameplay:
+//
+//  1. pollLimiter  — for HIGH-FREQUENCY polling routes called every ~1-3s per player
+//     (win-check, night-status, room-status). 300 req/min = 5req/sec, plenty for polling.
+//
+//  2. actionLimiter — moderate limit for normal game actions (night-action, role-commit, etc.)
+//     A player can't submit more than ~60 actions per minute legitimately.
+//
+//  3. heavyLimiter  — strict limit for EXPENSIVE operations (ZK proof gen, end-game).
+//     These are slow (2-5s each), so 10/minute is more than enough.
+//
+const pollLimiter = rateLimit({
+  windowMs: 60 * 1000,        // 1 minute window
+  max: 300,                   // 5 req/sec per IP — covers polling every 1s for ~5 players on same IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many polling requests, please wait.' },
+});
+
+const actionLimiter = rateLimit({
+  windowMs: 60 * 1000,        // 1 minute window
+  max: 60,                    // 1 req/sec — one action per second is more than enough
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many action requests, slow down.' },
+});
+
+const heavyLimiter = rateLimit({
+  windowMs: 60 * 1000,        // 1 minute window
+  max: 10,                    // Max 10 heavy ops/min — ZK proof takes 2-5s each
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many heavy requests, please wait.' },
+});
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use(express.json());
 
@@ -263,7 +301,7 @@ app.get('/health', (_req: express.Request, res: express.Response) => {
 });
 
 // ─── Investigation Proof (GM-verified) ───────────────────
-app.post('/investigation-proof', async (req: express.Request, res: express.Response) => {
+app.post('/investigation-proof', actionLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId, detectiveAddress, targetAddress, signature, signerAddress, nonce, timestamp, chainId } = req.body;
 
@@ -458,7 +496,7 @@ function allRolePlayersActed(roomIdStr: string, alivePlayers: any[]): boolean {
 
 // ─── Submit Night Action ──────────────────────────────────
 // Players call this instead of on-chain commitNightAction
-app.post('/night-action', async (req: express.Request, res: express.Response) => {
+app.post('/night-action', actionLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId, playerAddress, actionType, targetAddress, signature, signerAddress, nonce, timestamp, chainId, dayCount: bodyDayCount } = req.body;
 
@@ -620,7 +658,7 @@ app.post('/night-action', async (req: express.Request, res: express.Response) =>
 // ─── Skip Night Action ────────────────────────────────────
 // Allows a player to explicitly "pass" their turn.
 // Useful if they lost their local state (salt) or just want to wait.
-app.post('/skip-night-action', async (req: express.Request, res: express.Response) => {
+app.post('/skip-night-action', actionLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId, playerAddress, signature, signerAddress, nonce, timestamp, chainId, dayCount } = req.body;
     if (!roomId || !playerAddress || !signature) {
@@ -683,7 +721,7 @@ app.post('/skip-night-action', async (req: express.Request, res: express.Respons
 
 // ─── Resolve Night ────────────────────────────────────────
 // Called by frontend or auto-triggered when all actions are in
-app.post('/resolve-night', async (req: express.Request, res: express.Response) => {
+app.post('/resolve-night', heavyLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId, signature, callerAddress, playerAddress: reqPlayerAddress, signerAddress, nonce, timestamp, chainId } = req.body;
     if (!roomId) return res.status(400).json({ error: 'Missing roomId' });
@@ -798,7 +836,7 @@ app.post('/resolve-night', async (req: express.Request, res: express.Response) =
 
 // ─── Role Commit Sync ────────────────────────────────────
 // Frontend calls this to notify GM that a player has committed their role on-chain.
-app.post('/role-commit-sync', async (req: express.Request, res: express.Response) => {
+app.post('/role-commit-sync', actionLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId, playerAddress, txHash, signature, signerAddress, nonce, timestamp, chainId } = req.body;
     if (!roomId || !playerAddress || !signature) {
@@ -828,7 +866,7 @@ app.post('/role-commit-sync', async (req: express.Request, res: express.Response
 
 // ─── Get Night Status ─────────────────────────────────────
 // Frontend polls this to check how many actions are in
-app.get('/night-status/:roomId', (req: express.Request, res: express.Response) => {
+app.get('/night-status/:roomId', pollLimiter, (req: express.Request, res: express.Response) => {
   const rid = BigInt(req.params.roomId);
   const state = getNightState(rid);
 
@@ -846,7 +884,7 @@ app.get('/night-status/:roomId', (req: express.Request, res: express.Response) =
 });
 
 // ─── Get Room Info (convenience proxy) ────────────────────
-app.get('/room/:roomId', async (req: express.Request, res: express.Response) => {
+app.get('/room/:roomId', pollLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const rid = BigInt(req.params.roomId);
     const chainId = req.query.chainId ? Number(req.query.chainId) : undefined;
@@ -875,7 +913,7 @@ app.get('/room/:roomId', async (req: express.Request, res: express.Response) => 
 });
 
 // ─── Register ECIES Public Key ────────────────────────────
-app.post('/register-pubkey', async (req: express.Request, res: express.Response) => {
+app.post('/register-pubkey', actionLimiter, async (req: express.Request, res: express.Response) => {
   const { roomId, playerAddress, pubkey, signature, signerAddress, nonce, timestamp, chainId } = req.body;
   
   if (!roomId || !playerAddress || !pubkey || !signature) {
@@ -926,7 +964,7 @@ app.post('/register-pubkey', async (req: express.Request, res: express.Response)
 // ─── Submit SRA Decryption Key to GM ─────────────────────
 // Players send their real SRA key to GM off-chain (signed).
 // GM collects these to decrypt the deck privately — keys never go on-chain.
-app.post('/submit-sra-key', async (req: express.Request, res: express.Response) => {
+app.post('/submit-sra-key', actionLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId, playerAddress, sraKey, signature, signerAddress, nonce, timestamp, chainId } = req.body;
     if (!roomId || !playerAddress || !sraKey || !signature) {
@@ -1028,7 +1066,7 @@ app.post('/submit-sra-key', async (req: express.Request, res: express.Response) 
 // Returns the player's role encrypted with their registered ECIES pubkey.
 // Only the player with the matching private key can decrypt.
 // Returns 202 if not all SRA keys are collected yet (player should retry).
-app.get('/my-role/:roomId', async (req: express.Request, res: express.Response) => {
+app.get('/my-role/:roomId', pollLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId } = req.params;
     const { playerAddress, signature, signerAddress, nonce, timestamp, chainId } = req.query as Record<string, string>;
@@ -1137,7 +1175,7 @@ app.get('/my-role/:roomId', async (req: express.Request, res: express.Response) 
 // Returns all cached player→role mappings once the GM has collected all SRA keys.
 // If the cache is empty but SRA keys exist, attempts on-demand computation from chain data.
 // No authentication required — the game is over and roles are public information.
-app.get('/room-roles/:roomId', async (req: express.Request, res: express.Response) => {
+app.get('/room-roles/:roomId', pollLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId } = req.params;
     const { chainId } = req.query as Record<string, string>;
@@ -1258,7 +1296,7 @@ app.get('/room-roles/:roomId', async (req: express.Request, res: express.Respons
  * Returns a sorted list of Mafia member addresses.
  * Requires authentication to prove the caller is a member of the Mafia.
  */
-app.get('/mafia-members/:roomId', async (req: express.Request, res: express.Response) => {
+app.get('/mafia-members/:roomId', pollLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId } = req.params;
     const { playerAddress, signature, nonce, timestamp, chainId } = req.query as Record<string, string>;
@@ -1318,7 +1356,7 @@ app.get('/mafia-members/:roomId', async (req: express.Request, res: express.Resp
 // ─── Win Check ────────────────────────────────────────────────
 // The GM is the source of truth for all unrevealed roles.
 // Returns the current mafia vs town count to trigger end-game ZK proof.
-app.get('/win-check/:roomId', async (req: express.Request, res: express.Response) => {
+app.get('/win-check/:roomId', pollLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const roomId = req.params.roomId;
     const chainIdNum = req.query.chainId ? Number(req.query.chainId) : undefined;
@@ -1480,7 +1518,7 @@ async function start() {
 }
 
 // ─── End Game ZK Proof (Move from Frontend) ──────────────
-app.post('/end-game-zk/:roomId', async (req: express.Request, res: express.Response) => {
+app.post('/end-game-zk/:roomId', heavyLimiter, async (req: express.Request, res: express.Response) => {
   try {
     const { roomId } = req.params;
     const { chainId } = req.body; // allow passing chainId if needed
