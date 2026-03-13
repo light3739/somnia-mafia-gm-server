@@ -66,6 +66,8 @@ export const DIAMOND_ABI = [
           { name: 'keysSharedCount', type: 'uint8' },
           { name: 'depositPool', type: 'uint128' },
           { name: 'depositPerPlayer', type: 'uint128' },
+          { name: 'isPrivate', type: 'bool' },
+          { name: 'tournamentId', type: 'uint256' },
         ],
       },
     ],
@@ -152,8 +154,8 @@ if (!process.env.GM_PRIVATE_KEY) {
 const gmAccount = privateKeyToAccount(process.env.GM_PRIVATE_KEY as Hex);
 export const GM_ADDRESS = gmAccount.address;
 
-const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x3c1bd1923f8318247e2b60e41b0f280391c4e1e1') as Address;
-const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0xb34f8430f8a755c8c1bdc9dd19f14e263fc3f6b1') as Address;
+const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0xa7f0fa14e49721ce598dd39b860b54b0e600b099') as Address;
+const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0x36d37e145abfcf38b97fa44a5154445758ce7bf0') as Address;
 
 const chainsConfig: Record<number, { public: any, wallet: any, diamond: Address }> = {
   [avalancheFuji.id]: {
@@ -278,5 +280,18 @@ export async function assertChainConfigOrThrow() {
       console.warn(`[chain] Warning: Chain ${cid} not responding correctly (got ${rpcChainId}). Check RPC_URL.`);
     }
   }
+}
+
+// ─── Private Room Join Permit ─────────────────────────────────
+// Signs keccak256(abi.encodePacked(roomId, playerAddress)) using GM wallet.
+// This matches LibGame.verifyGmSignature() on-chain exactly.
+import { keccak256, encodePacked } from 'viem';
+
+export async function signJoinPermit(roomId: bigint, playerAddress: Address): Promise<`0x${string}`> {
+  const messageHash = keccak256(encodePacked(['uint256', 'address'], [roomId, playerAddress]));
+  // signMessage applies EIP-191 prefix ("\x19Ethereum Signed Message:\n32" + hash)
+  // — matches the ethHash in LibGame.verifyGmSignature()
+  const signature = await gmAccount.signMessage({ message: { raw: messageHash } });
+  return signature;
 }
 

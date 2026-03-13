@@ -19,6 +19,7 @@ import {
   GamePhase,
   FLAGS,
   ACTION_TO_ROLE,
+  signJoinPermit,
 } from './chain.js';
 import { eciesEncrypt } from './ecies.js';
 import {
@@ -298,6 +299,127 @@ app.get('/health', (_req: express.Request, res: express.Response) => {
     activeRooms: getAllNightStates().size,
     uptime: process.uptime(),
   });
+});
+
+// ─── Private Rooms: Password Management ──────────────────────
+//
+// Flow:
+//   1. Host creates room → calls POST /room-password to set password
+//   2. Player wants to join → calls POST /request-join with password
+//   3. GM Server verifies → returns cryptographic signature
+//   4. Player passes signature to joinRoom() on-chain → contract verifies via ecrecover
+//
+// Passwords stored in Redis with 24h TTL (same as game data).
+
+// Host sets password for a room
+app.post('/room-password', actionLimiter, async (req: express.Request, res: express.Response) => {
+  try {
+    const { roomId, password, hostAddress, signature, signerAddress, nonce, timestamp, chainId } = req.body;
+
+    if (!roomId || !password || !hostAddress || !signature) {
+      return res.status(400).json({ error: 'Missing fields: roomId, password, hostAddress, signature' });
+    }
+
+    if (typeof password !== 'string' || password.length < 1 || password.length > 64) {
+      return res.status(400).json({ error: 'Password must be 1-64 characters' });
+    }
+
+    // Verify signature (host must prove they are the host)
+    const signatureCheck = await verifyAuthorizedSignature({
+      roomId: String(roomId),
+      playerAddress: String(hostAddress),
+      signature: String(signature) as `0x${string}`,
+      signerAddress: signerAddress ? String(signerAddress) : undefined,
+      nonce: nonce ? String(nonce) : undefined,
+      timestamp: timestamp ? Number(timestamp) : undefined,
+      chainId: chainId ? Number(chainId) : undefined,
+      buildLegacyMessage: () => `setRoomPassword:${roomId}:${hostAddress}`,
+      buildModernMessage: (n: string, ts: number) =>
+        `setRoomPassword:${roomId}:${hostAddress}:${n}:${ts}`,
+    });
+
+    if (!signatureCheck.ok) {
+      return res.status(signatureCheck.status || 401).json({ error: signatureCheck.error });
+    }
+
+    // Verify caller is room host
+    const room = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined) as any;
+    if (room.host.toLowerCase() !== hostAddress.toLowerCase()) {
+      return res.status(403).json({ error: 'Only the room host can set a password' });
+    }
+
+    // Store password hash in Redis/memory
+    const redis = getRedis();
+    const passwordKey = `room:password:${roomId}`;
+    // Store bcrypt-like hash? No — simple keccak is fine for game passwords
+    const { keccak256, toBytes } = await import('viem');
+    const passHash = keccak256(toBytes(password));
+
+    if (redis) {
+      await redis.set(passwordKey, passHash, 'EX', 86400); // 24h TTL
+    } else {
+      // Memory fallback for dev
+      (globalThis as any).__roomPasswords = (globalThis as any).__roomPasswords || {};
+      (globalThis as any).__roomPasswords[String(roomId)] = passHash;
+    }
+
+    console.log(`[room-password] Room ${roomId}: password set by ${hostAddress}`);
+    return res.json({ success: true });
+
+  } catch (err: any) {
+    console.error('[room-password] Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Player requests join permit (sends password, gets GM signature back)
+app.post('/request-join', actionLimiter, async (req: express.Request, res: express.Response) => {
+  try {
+    const { roomId, password, playerAddress } = req.body;
+
+    if (!roomId || !password || !playerAddress) {
+      return res.status(400).json({ error: 'Missing fields: roomId, password, playerAddress' });
+    }
+
+    // Get stored password hash
+    const redis = getRedis();
+    const passwordKey = `room:password:${roomId}`;
+    let storedHash: string | null = null;
+
+    if (redis) {
+      storedHash = await redis.get(passwordKey);
+    } else {
+      storedHash = (globalThis as any).__roomPasswords?.[String(roomId)] || null;
+    }
+
+    if (!storedHash) {
+      return res.status(404).json({ error: 'No password set for this room (room is public or expired)' });
+    }
+
+    // Verify password
+    const { keccak256, toBytes } = await import('viem');
+    const providedHash = keccak256(toBytes(password));
+
+    if (providedHash !== storedHash) {
+      return res.status(403).json({ error: 'Wrong password' });
+    }
+
+    // Password correct → sign join permit
+    const gmSignature = await signJoinPermit(
+      BigInt(roomId),
+      playerAddress as `0x${string}`
+    );
+
+    console.log(`[request-join] Room ${roomId}: join permit issued for ${playerAddress}`);
+    return res.json({
+      success: true,
+      gmSignature,
+    });
+
+  } catch (err: any) {
+    console.error('[request-join] Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Investigation Proof (GM-verified) ───────────────────
