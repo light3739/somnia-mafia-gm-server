@@ -1253,6 +1253,68 @@ app.get('/room-roles/:roomId', async (req: express.Request, res: express.Respons
   }
 });
 
+/**
+ * GET /mafia-members/:roomId
+ * Returns a sorted list of Mafia member addresses.
+ * Requires authentication to prove the caller is a member of the Mafia.
+ */
+app.get('/mafia-members/:roomId', async (req: express.Request, res: express.Response) => {
+  try {
+    const { roomId } = req.params;
+    const { playerAddress, signature, nonce, timestamp, chainId } = req.query as Record<string, string>;
+
+    if (!playerAddress || !signature || !nonce || !timestamp) {
+      return res.status(400).json({ error: 'Missing authentication parameters' });
+    }
+
+    const chainIdNum = chainId ? Number(chainId) : undefined;
+
+    // 1. Verify signature
+    const sigCheck = await verifyAuthorizedSignature({
+      roomId: String(roomId),
+      signature: signature as `0x${string}`,
+      playerAddress,
+      nonce,
+      timestamp: Number(timestamp),
+      chainId: chainIdNum,
+      buildLegacyMessage: () => `mafia-members:${roomId}`,
+      buildModernMessage: (n, ts) => `mafia-members:${roomId}:${n}:${ts}`,
+    });
+
+    if (!sigCheck.ok) {
+      return res.status(sigCheck.status).json({ error: sigCheck.error });
+    }
+
+    // 2. Resolve roles for the room
+    const cachedRoles = resolvedRoles.get(String(roomId));
+    if (!cachedRoles || cachedRoles.size === 0) {
+      // If roles aren't cached, we can't verify yet
+      return res.status(202).json({ pending: true, message: 'Roles not yet resolved. Wait for all SRA keys.' });
+    }
+
+    // 3. Verify the caller is Mafia
+    const callerRole = cachedRoles.get(playerAddress.toLowerCase());
+    if (callerRole !== 'MAFIA') {
+      return res.status(403).json({ error: 'Access denied: caller is not a member of the Mafia' });
+    }
+
+    // 4. Extract and sort Mafia addresses
+    const mafiaAddresses: string[] = [];
+    for (const [addr, role] of cachedRoles) {
+      if (role === 'MAFIA') {
+        mafiaAddresses.push(addr.toLowerCase());
+      }
+    }
+    mafiaAddresses.sort();
+
+    return res.json({ mafia: mafiaAddresses });
+
+  } catch (err: any) {
+    console.error('[mafia-members] Error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Win Check ────────────────────────────────────────────────
 // The GM is the source of truth for all unrevealed roles.
 // Returns the current mafia vs town count to trigger end-game ZK proof.
