@@ -333,9 +333,9 @@ app.post('/room-password', actionLimiter, async (req: express.Request, res: expr
       nonce: nonce ? String(nonce) : undefined,
       timestamp: timestamp ? Number(timestamp) : undefined,
       chainId: chainId ? Number(chainId) : undefined,
-      buildLegacyMessage: () => `setRoomPassword:${roomId}:${hostAddress}`,
+      buildLegacyMessage: () => `setRoomPassword:${String(roomId)}:${String(hostAddress).toLowerCase()}`,
       buildModernMessage: (n: string, ts: number) =>
-        `setRoomPassword:${roomId}:${hostAddress}:${n}:${ts}`,
+        `setRoomPassword:${String(roomId)}:${String(hostAddress).toLowerCase()}:${n}:${ts}`,
     });
 
     if (!signatureCheck.ok) {

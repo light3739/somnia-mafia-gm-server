@@ -139,10 +139,17 @@ export const DIAMOND_ABI = [
     ],
   },
   {
+    stateMutability: 'view',
+  },
+  {
     type: 'function',
-    name: 'getDeck',
+    name: 'getMafiaConsensus',
     inputs: [{ name: 'roomId', type: 'uint256' }],
-    outputs: [{ name: '', type: 'string[]' }],
+    outputs: [
+      { name: 'committed', type: 'uint8' },
+      { name: 'revealed', type: 'uint8' },
+      { name: 'consensusTarget', type: 'address' },
+    ],
     stateMutability: 'view',
   },
 ] as const;
