@@ -7,6 +7,9 @@ on:
 
 jobs:
   deploy:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     steps:
       - name: Notify start (Telegram)
@@ -14,11 +17,31 @@ jobs:
           if [ -n "${{ secrets.TELEGRAM_BOT_TOKEN }}" ] && [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
             curl -sS -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-              -d text="🚀 GM dev deploy started: ${{ github.repository }} @ ${{ github.ref_name }} | ${{ github.sha }}"
+              -d text="🚀 GM dev build & deploy started: ${{ github.repository }} @ ${{ github.ref_name }}"
           fi
 
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ghcr.io/light3739/somnia-mafia-gm-server:dev
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Setup SSH key
         run: |
@@ -31,7 +54,7 @@ jobs:
           if [ -z "$PORT" ]; then PORT=22; fi
           ssh-keyscan -p "$PORT" -H "$HOST" >> ~/.ssh/known_hosts
 
-      - name: Sync gm-server to test server
+      - name: Deploy to test server
         env:
           SSH_HOST: ${{ secrets.MAFIATEST_SSH_HOST }}
           SSH_USER: ${{ secrets.GM_SSH_USER }}
@@ -44,35 +67,7 @@ jobs:
           REMOTE_DIR="/root/mafia-dev/gm-server"
           FRONTEND_COMPOSE_DIR="/root/mafia-dev/frontend/ops/frontend-server"
 
-          echo "[gm-dev:deploy] Packaging and uploading gm-server to ${USER}@${HOST}:${REMOTE_DIR}"
-          ssh -p "$PORT" "${USER}@${HOST}" "mkdir -p '$REMOTE_DIR'"
-
-          # Create a tarball in /tmp to avoid "file changed as we read it" error
-          tar -czf /tmp/gm-server.tar.gz --exclude='.git' --exclude='node_modules' --exclude='dist' .
-          
-          scp -P "$PORT" /tmp/gm-server.tar.gz "${USER}@${HOST}:${REMOTE_DIR}/"
-
-          echo "[gm-dev:deploy] Extracting on remote"
-          ssh -p "$PORT" "${USER}@${HOST}" "cd '$REMOTE_DIR' && tar -xzf gm-server.tar.gz && rm gm-server.tar.gz"
-
-          echo "[gm-dev:deploy] Validating .env on remote"
-          ssh -p "$PORT" "${USER}@${HOST}" "
-            set -euo pipefail
-
-            if [ ! -f '$REMOTE_DIR/.env' ]; then
-              echo '[gm-dev:deploy] ERROR: $REMOTE_DIR/.env not found'
-              echo '[gm-dev:deploy] Create it manually with GM_PRIVATE_KEY and other required vars'
-              exit 1
-            fi
-
-            KEY=\"\$(grep -E '^GM_PRIVATE_KEY=' '$REMOTE_DIR/.env' | head -n1 | cut -d= -f2- || true)\"
-            if [ -z \"\$KEY\" ]; then
-              echo '[gm-dev:deploy] ERROR: GM_PRIVATE_KEY is missing in .env'
-              exit 1
-            fi
-          "
-
-          echo "[gm-dev:deploy] Rebuilding gm-server container"
+          echo "[gm-dev:deploy] Rebuilding gm-server container via GHCR pull"
           DEPLOY_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
           DEPLOY_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
@@ -82,14 +77,11 @@ jobs:
 
             if [ ! -f docker-compose.dev.yaml ]; then
               echo '[gm-dev:deploy] ERROR: docker-compose.dev.yaml not found at $FRONTEND_COMPOSE_DIR'
-              echo '[gm-dev:deploy] Make sure frontend was deployed first (dev branch push)'
               exit 1
             fi
 
-            docker compose --project-name mafia-dev -f docker-compose.dev.yaml up -d --build gm-server
-
-            echo '[gm-dev:deploy] Current containers:'
-            docker compose --project-name mafia-dev -f docker-compose.dev.yaml ps
+            docker compose --project-name mafia-dev -f docker-compose.dev.yaml pull gm-server
+            docker compose --project-name mafia-dev -f docker-compose.dev.yaml up -d gm-server
 
             # Telegram notification from server (has bot token in env)
             ENV_FILE=/etc/mafia-monitor.env
@@ -99,7 +91,7 @@ jobs:
             if [ -n \"\$BOT_TOKEN\" ] && [ -n \"\$CHAT_ID\" ]; then
               curl -sS -X POST \"https://api.telegram.org/bot\${BOT_TOKEN}/sendMessage\" \
                 -d \"chat_id=\${CHAT_ID}\" \
-                --data-urlencode \"text=🧪 GM-server TEST deployed\nBranch: $DEPLOY_BRANCH\nCommit: $DEPLOY_SHA\nURL: https://gm-test.mafiaonchain.live/health\" \
+                --data-urlencode \"text=🧪 GM-server GHCR deployed\nBranch: $DEPLOY_BRANCH\nCommit: $DEPLOY_SHA\" \
                 >/dev/null || true
             fi
           "
