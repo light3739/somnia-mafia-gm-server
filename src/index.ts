@@ -205,6 +205,7 @@ async function verifyAuthorizedSignature(params: {
   nonce?: string;
   timestamp?: number;
   chainId?: number;
+  nonceScope?: string; // NEW: optional scope for replay protection
 }): Promise<{ ok: true; signer: string } | { ok: false; error: string; status: number }> {
   const {
     roomId,
@@ -234,6 +235,14 @@ async function verifyAuthorizedSignature(params: {
       if (age > 300000 || age < -30000) {
         return { ok: false, error: 'Timestamp expired or too far in future (max ±5 min)', status: 401 };
       }
+
+      // Check replay attack protection using nonce
+      const scope = params.nonceScope || 'default';
+      const isFirstTime = await ServerStore.consumeReplayNonce(scope, roomId, normalizedSigner, nonce);
+      if (!isFirstTime) {
+        return { ok: false, error: 'Nonce already used (potential replay)', status: 401 };
+      }
+
       valid = await verifyMessage({
         address: normalizedSigner as Address,
         message: buildModernMessage(nonce, tsNum),
