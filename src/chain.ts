@@ -154,7 +154,6 @@ export const DIAMOND_ABI = [
   },
 ] as const;
 
-// ─── Clients ──────────────────────────────────────────────
 if (!process.env.GM_PRIVATE_KEY) {
   throw new Error('FATAL: GM_PRIVATE_KEY is missing from environment variables');
 }
