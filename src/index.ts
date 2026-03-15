@@ -272,32 +272,46 @@ async function verifyAuthorizedSignature(params: {
 
   // If modern signature was from session key, verify it's valid for main wallet
   if (normalizedSigner !== normalizedPlayer) {
-    try {
-      const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
-      const sessionAddress = String(session.sessionAddress || '').toLowerCase();
-      const expiresAt = Number(session.expiresAt || 0);
-      const sessionRoomId = Number(session.roomId || 0);
-      const isActive = Boolean(session.isActive);
-      const expectedRoomId = Number(BigInt(roomId));
+    let lastError: string = 'Session key is not registered for this player';
+    
+    // Retry verification up to 4 times (total ~5 seconds) in case of RPC lag
+    for (let i = 0; i < 4; i++) {
+      try {
+        const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
+        const sessionAddress = String(session.sessionAddress || '').toLowerCase();
+        const expiresAt = Number(session.expiresAt || 0);
+        const sessionRoomId = Number(session.roomId || 0);
+        const isActive = Boolean(session.isActive);
+        const expectedRoomId = Number(BigInt(roomId));
 
-      if (!sessionAddress || sessionAddress !== normalizedSigner) {
-        console.error('[AUTH FAIL] Session key not registered', { normalizedSigner, normalizedPlayer, sessionAddress });
-        return { ok: false, error: 'Session key is not registered for this player', status: 403 };
+        if (!sessionAddress || sessionAddress !== normalizedSigner) {
+          lastError = `Session key not registered (got ${sessionAddress || 'none'})`;
+          // Don't break, retry
+        } else if (!isActive || expiresAt <= Math.floor(Date.now() / 1000)) {
+          lastError = 'Session key inactive or expired';
+        } else if (sessionRoomId !== expectedRoomId) {
+          lastError = `Session key room mismatch (expected ${expectedRoomId}, got ${sessionRoomId})`;
+        } else {
+          // Success!
+          return { ok: true, signer: normalizedSigner };
+        }
+      } catch (e: any) {
+        lastError = `Session verification failed: ${e?.message || 'unknown error'}`;
       }
-
-      if (!isActive || expiresAt <= Math.floor(Date.now() / 1000)) {
-        console.error('[AUTH FAIL] Session key inactive or expired', { isActive, expiresAt, now: Math.floor(Date.now() / 1000) });
-        return { ok: false, error: 'Session key inactive or expired', status: 403 };
+      
+      if (i < 3) {
+        console.warn(`[AUTH] Session verification attempt ${i+1} failed for ${normalizedPlayer}, retrying in 1.5s...`);
+        await new Promise(r => setTimeout(r, 1500));
       }
-
-      if (sessionRoomId !== expectedRoomId) {
-        console.error('[AUTH FAIL] Session key room mismatch', { sessionRoomId, expectedRoomId });
-        return { ok: false, error: 'Session key room mismatch', status: 403 };
-      }
-    } catch (e: any) {
-      console.error('[AUTH FAIL] Error fetching session info', e);
-      return { ok: false, error: `Session verification failed: ${e?.message || 'unknown error'}`, status: 500 };
     }
+
+    console.error('[AUTH FAIL] Session verification failed after retries', { 
+      normalizedSigner, 
+      normalizedPlayer, 
+      error: lastError,
+      roomId
+    });
+    return { ok: false, error: lastError, status: 403 };
   }
 
   return { ok: true, signer: normalizedSigner };
