@@ -1,4 +1,4 @@
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 
 /**
  * Standard Redis client (works with RedisLabs, Upstash, etc. via connection string)
@@ -7,7 +7,7 @@ const redis = process.env.REDIS_URL
     ? new Redis(process.env.REDIS_URL, {
         connectTimeout: 5000, // 5 seconds
         maxRetriesPerRequest: 3,
-        retryStrategy: (times) => {
+        retryStrategy: (times: number) => {
             if (times > 3) return null; // stop retrying after 3 times to prevent hangs
             return Math.min(times * 100, 1000);
         }
@@ -19,7 +19,7 @@ const ALLOW_INSECURE_MEMORY_FALLBACK = process.env.ALLOW_INSECURE_MEMORY_FALLBAC
 const FAIL_CLOSED_SECURITY_STORAGE = IS_PRODUCTION && !ALLOW_INSECURE_MEMORY_FALLBACK;
 
 if (redis) {
-    redis.on('error', (err) => console.error('[ServerStore] Redis Connection Error:', err));
+    redis.on('error', (err: any) => console.error('[ServerStore] Redis Connection Error:', err));
 }
 
 /**
@@ -194,7 +194,7 @@ export class ServerStore {
             // Parse JSON strings back to PlayerSecret objects
             const parsed: Record<string, PlayerSecret> = {};
             for (let [addr, secretStr] of Object.entries(data)) {
-                parsed[addr] = JSON.parse(secretStr);
+                parsed[addr] = JSON.parse(secretStr as string);
             }
             return parsed;
         } catch (e) {

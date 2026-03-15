@@ -13,7 +13,7 @@
  *
  * TTL: 48h — enough for a long tournament session.
  */
-import Redis from 'ioredis';
+import { Redis } from 'ioredis';
 import type { RoomNightState, NightAction } from './game-state.js';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
@@ -125,7 +125,7 @@ export async function loadAllState(redis: Redis, containers: StateContainers): P
     const stream = redis.scanStream({ match: 'gm:room:*', count: 200 });
     stream.on('data', (batch: string[]) => keys.push(...batch));
     stream.on('end', resolve);
-    stream.on('error', reject);
+    stream.on('error', (err: any) => reject(err));
   });
 
   if (keys.length === 0) {
