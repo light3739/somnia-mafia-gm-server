@@ -16,8 +16,10 @@ import {
   getChainConfig,
   DIAMOND_ABI,
   GM_ADDRESS,
+  avalancheFuji,
   GamePhase,
   FLAGS,
+  Role,
   ACTION_TO_ROLE,
   signJoinPermit,
 } from './chain.js';
@@ -375,7 +377,7 @@ app.post('/room-password', actionLimiter, async (req: express.Request, res: expr
 
     // Store password hash in Redis/memory
     const redis = getRedis();
-    const passwordKey = `room:password:${roomId}`;
+    const passwordKey = `room:password:${chainId || avalancheFuji.id}:${roomId}`;
     const { keccak256, toBytes } = await import('viem');
     const passHash = keccak256(toBytes(password));
 
@@ -383,7 +385,7 @@ app.post('/room-password', actionLimiter, async (req: express.Request, res: expr
       await redis.set(passwordKey, passHash, 'EX', 86400); // 24h TTL
     } else {
       (globalThis as any).__roomPasswords = (globalThis as any).__roomPasswords || {};
-      (globalThis as any).__roomPasswords[String(roomId)] = passHash;
+      (globalThis as any).__roomPasswords[`${chainId || avalancheFuji.id}:${roomId}`] = passHash;
     }
 
     console.log(`[room-password] Room ${roomId}: password set by ${hostAddress}`);
@@ -398,7 +400,7 @@ app.post('/room-password', actionLimiter, async (req: express.Request, res: expr
 // Player requests join permit (sends password, gets GM signature back)
 app.post('/request-join', actionLimiter, async (req: express.Request, res: express.Response) => {
   try {
-    const { roomId, password, playerAddress } = req.body;
+    const { roomId, password, playerAddress, chainId } = req.body;
 
     if (!roomId || !password || !playerAddress) {
       return res.status(400).json({ error: 'Missing fields: roomId, password, playerAddress' });
@@ -406,13 +408,13 @@ app.post('/request-join', actionLimiter, async (req: express.Request, res: expre
 
     // Get stored password hash
     const redis = getRedis();
-    const passwordKey = `room:password:${roomId}`;
+    const passwordKey = `room:password:${chainId || avalancheFuji.id}:${roomId}`;
     let storedHash: string | null = null;
 
     if (redis) {
       storedHash = await redis.get(passwordKey);
     } else {
-      storedHash = (globalThis as any).__roomPasswords?.[String(roomId)] || null;
+      storedHash = (globalThis as any).__roomPasswords?.[`${chainId || avalancheFuji.id}:${roomId}`] || null;
     }
 
     if (!storedHash) {
