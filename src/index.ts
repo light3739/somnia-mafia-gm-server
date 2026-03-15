@@ -22,8 +22,8 @@ import {
   Role,
   ACTION_TO_ROLE,
   signJoinPermit,
-} from './chain.js';
-import { eciesEncrypt } from './ecies.js';
+} from './chain';
+import { eciesEncrypt } from './ecies';
 import {
   getOrCreateNightState,
   clearNightState,
@@ -33,7 +33,7 @@ import {
   calculateMafiaConsensus,
   getDoctorHeal,
   type NightAction,
-} from './game-state.js';
+} from './game-state';
 import {
   connectRedis,
   getRedis,
@@ -44,9 +44,9 @@ import {
   rPersistNightState,
   rDeleteNightState,
   loadAllState,
-} from './redis.js';
-import { ServerStore } from './services/serverStore.js';
-import { generateEndGameProof, calculatePoseidon } from './zk.js';
+} from './redis';
+import { ServerStore } from './services/serverStore';
+import { generateEndGameProof, calculatePoseidon } from './zk';
 import { Mutex } from 'async-mutex';
 
 const zkMutex = new Mutex();
