@@ -28,19 +28,28 @@ export function getRedis(): RedisClient {
 }
 
 export async function connectRedis(): Promise<void> {
-  try {
-    const client = new Redis(REDIS_URL, {
-      connectTimeout: 3000,
-      maxRetriesPerRequest: 1,
-      lazyConnect: true,
-      enableOfflineQueue: false,
-    });
-    await client.ping();
+  const client = new Redis(REDIS_URL, {
+    connectTimeout: 10000,
+    maxRetriesPerRequest: null, // Allow ioredis to handle retries
+    enableOfflineQueue: true,
+  });
+
+  client.on('connect', () => {
     _redis = client;
     console.log(`[redis] Connected: ${REDIS_URL}`);
-  } catch (e: any) {
-    console.warn(`[redis] Unavailable (${e.message}) — using in-memory state only`);
-    _redis = null;
+  });
+
+  client.on('error', (err) => {
+    console.error(`[redis] Error: ${err.message}`);
+    // We don't nullify _redis here, ioredis will retry
+  });
+
+  // Try initial connect
+  try {
+    await client.connect().catch(() => {}); // ignore initial connect error, it will retry
+    _redis = client; 
+  } catch (e) {
+    // fallback log
   }
 }
 
