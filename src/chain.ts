@@ -294,10 +294,9 @@ export async function assertChainConfigOrThrow() {
 // This matches LibGame.verifyGmSignature() on-chain exactly.
 import { keccak256, encodePacked } from 'viem';
 
-export async function signJoinPermit(roomId: bigint, playerAddress: Address): Promise<`0x${string}`> {
-  const messageHash = keccak256(encodePacked(['uint256', 'address'], [roomId, playerAddress]));
+export async function signJoinPermit(roomId: bigint, playerAddress: Address, chainId: number): Promise<`0x${string}`> {
+  const messageHash = keccak256(encodePacked(['uint256', 'uint256', 'address'], [BigInt(chainId), roomId, playerAddress]));
   // signMessage applies EIP-191 prefix ("\x19Ethereum Signed Message:\n32" + hash)
-  // — matches the ethHash in LibGame.verifyGmSignature()
   const signature = await gmAccount.signMessage({ message: { raw: messageHash } });
   return signature;
 }

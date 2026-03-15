@@ -448,7 +448,8 @@ app.post('/request-join', actionLimiter, async (req: express.Request, res: expre
     // Password correct → sign join permit
     const gmSignature = await signJoinPermit(
       BigInt(roomId),
-      playerAddress as `0x${string}`
+      playerAddress as `0x${string}`,
+      chainId ? Number(chainId) : avalancheFuji.id
     );
 
     console.log(`[request-join] Room ${roomId}: join permit issued for ${playerAddress}`);
