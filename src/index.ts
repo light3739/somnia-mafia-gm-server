@@ -54,6 +54,7 @@ const zkMutex = new Mutex();
 const ALLOWED_ORIGINS = [
   'https://mafiaonchain.live',
   'https://test.mafiaonchain.live',
+  'http://localhost:3000',
   ...(process.env.CORS_EXTRA_ORIGIN ? [process.env.CORS_EXTRA_ORIGIN] : []),
 ];
 
