@@ -351,23 +351,37 @@ app.post('/room-password', actionLimiter, async (req: express.Request, res: expr
       return res.status(signatureCheck.status || 401).json({ error: signatureCheck.error });
     }
 
-    // Verify caller is room host
-    const room = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined) as any;
+    // Verify caller is room host (with retry for RPC sync)
+    let room: any = null;
+    for (let i = 0; i < 5; i++) {
+      try {
+        room = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
+        if (room && room.host && room.host !== ZERO_ADDR) break;
+      } catch (e: any) {
+        console.warn(`[room-password] Room ${roomId} lookup attempt ${i+1} failed: ${e?.message || 'unknown error'}`);
+      }
+      await new Promise(r => setTimeout(r, 1000 * (i + 1))); // exponential backoff
+    }
+
+    if (!room || !room.host || room.host === ZERO_ADDR) {
+      console.error(`[room-password] Room ${roomId} not found on chain after retries`);
+      return res.status(404).json({ error: 'Room not found on chain yet. Please try again in a few seconds.' });
+    }
+
     if (room.host.toLowerCase() !== hostAddress.toLowerCase()) {
+      console.error(`[room-password] Room ${roomId} host mismatch: expected ${room.host}, got ${hostAddress}`);
       return res.status(403).json({ error: 'Only the room host can set a password' });
     }
 
     // Store password hash in Redis/memory
     const redis = getRedis();
     const passwordKey = `room:password:${roomId}`;
-    // Store bcrypt-like hash? No — simple keccak is fine for game passwords
     const { keccak256, toBytes } = await import('viem');
     const passHash = keccak256(toBytes(password));
 
     if (redis) {
       await redis.set(passwordKey, passHash, 'EX', 86400); // 24h TTL
     } else {
-      // Memory fallback for dev
       (globalThis as any).__roomPasswords = (globalThis as any).__roomPasswords || {};
       (globalThis as any).__roomPasswords[String(roomId)] = passHash;
     }
@@ -402,6 +416,7 @@ app.post('/request-join', actionLimiter, async (req: express.Request, res: expre
     }
 
     if (!storedHash) {
+      console.warn(`[request-join] Room ${roomId} password hash not found in Redis/memory`);
       return res.status(404).json({ error: 'No password set for this room (room is public or expired)' });
     }
 
