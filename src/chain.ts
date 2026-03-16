@@ -152,6 +152,45 @@ export const DIAMOND_ABI = [
     ],
     stateMutability: 'view',
   },
+  {
+    type: 'function',
+    name: 'isTournamentParticipant',
+    inputs: [
+      { name: 'tournamentId', type: 'uint256' },
+      { name: 'player', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getTournament',
+    inputs: [{ name: 'tournamentId', type: 'uint256' }],
+    outputs: [
+      {
+        name: '',
+        type: 'tuple',
+        components: [
+          { name: 'id', type: 'uint256' },
+          { name: 'organizer', type: 'address' },
+          { name: 'name', type: 'string' },
+          { name: 'buyIn', type: 'uint128' },
+          { name: 'prizePool', type: 'uint128' },
+          { name: 'platformFeePool', type: 'uint128' },
+          { name: 'paymentToken', type: 'address' },
+          { name: 'maxPlayers', type: 'uint8' },
+          { name: 'playersPerTable', type: 'uint8' },
+          { name: 'currentRound', type: 'uint8' },
+          { name: 'phase', type: 'uint8' },
+          { name: 'passwordHash', type: 'bytes32' },
+          { name: 'prizesClaimed', type: 'bool' },
+          { name: 'registrationDeadline', type: 'uint32' },
+          { name: 'participants', type: 'address[]' },
+        ],
+      },
+    ],
+    stateMutability: 'view',
+  },
 ] as const;
 
 if (!process.env.GM_PRIVATE_KEY) {
@@ -160,8 +199,8 @@ if (!process.env.GM_PRIVATE_KEY) {
 const gmAccount = privateKeyToAccount(process.env.GM_PRIVATE_KEY as Hex);
 export const GM_ADDRESS = gmAccount.address;
 
-const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x740d9e5095acc228860509e46cfac1b8a517998c') as Address;
-const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0x923db96df1193aba3f748e8af3922bdf07056b5c') as Address;
+const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x45343671c3a3149891bf95adadc2d87c52194149') as Address;
+const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0x0406a14729b0c77c187ac5229c8c2317589e73c0') as Address;
 
 const chainsConfig: Record<number, { public: any, wallet: any, diamond: Address }> = {
   [avalancheFuji.id]: {
@@ -260,6 +299,26 @@ export async function getSessionKey(mainWallet: Address, chainId?: number) {
     abi: DIAMOND_ABI,
     functionName: 'sessionKeys',
     args: [mainWallet],
+  });
+}
+
+export async function isTournamentParticipant(tournamentId: bigint, player: Address, chainId?: number): Promise<boolean> {
+  const { public: client, diamond } = getChainConfig(chainId);
+  return client.readContract({
+    address: diamond,
+    abi: DIAMOND_ABI,
+    functionName: 'isTournamentParticipant',
+    args: [tournamentId, player],
+  }) as Promise<boolean>;
+}
+
+export async function getTournament(tournamentId: bigint, chainId?: number) {
+  const { public: client, diamond } = getChainConfig(chainId);
+  return client.readContract({
+    address: diamond,
+    abi: DIAMOND_ABI,
+    functionName: 'getTournament',
+    args: [tournamentId],
   });
 }
 

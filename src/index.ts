@@ -22,6 +22,8 @@ import {
   Role,
   ACTION_TO_ROLE,
   signJoinPermit,
+  isTournamentParticipant,
+  getTournament,
 } from './chain.js';
 import { eciesEncrypt } from './ecies.js';
 import {
@@ -391,6 +393,18 @@ app.post('/room-password', actionLimiter, async (req: express.Request, res: expr
       return res.status(403).json({ error: 'Only the room host can set a password' });
     }
 
+    // NEW: Tournament membership check for host
+    if (room.tournamentId && room.tournamentId > 0n) {
+      const tournament = await getTournament(room.tournamentId, chainId) as any;
+      if (tournament && tournament.buyIn > 0n) {
+        const isPart = await isTournamentParticipant(room.tournamentId, hostAddress, chainId);
+        if (!isPart) {
+          console.error(`[room-password] Room ${roomId}: Host ${hostAddress} not in tournament ${room.tournamentId}`);
+          return res.status(403).json({ error: 'Must join tournament first to host this room' });
+        }
+      }
+    }
+
     // Store password hash in Redis/memory
     const redis = getRedis();
     const passwordKey = `room:password:${chainId || avalancheFuji.id}:${roomId}`;
@@ -444,6 +458,19 @@ app.post('/request-join', actionLimiter, async (req: express.Request, res: expre
 
     if (providedHash !== storedHash) {
       return res.status(403).json({ error: 'Wrong password' });
+    }
+
+    // NEW: Tournament membership check for joiner
+    const room = await getRoom(BigInt(roomId), chainId);
+    if (room && room.tournamentId && room.tournamentId > 0n) {
+        const tournament = await getTournament(room.tournamentId, chainId) as any;
+        if (tournament && tournament.buyIn > 0n) {
+            const isPart = await isTournamentParticipant(room.tournamentId, playerAddress as Address, chainId);
+            if (!isPart) {
+                console.error(`[request-join] Room ${roomId}: Player ${playerAddress} not in tournament ${room.tournamentId}`);
+                return res.status(403).json({ error: 'Must join tournament first' });
+            }
+        }
     }
 
     // Password correct → sign join permit
