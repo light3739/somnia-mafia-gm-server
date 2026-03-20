@@ -199,7 +199,7 @@ if (!process.env.GM_PRIVATE_KEY) {
 const gmAccount = privateKeyToAccount(process.env.GM_PRIVATE_KEY as Hex);
 export const GM_ADDRESS = gmAccount.address;
 
-const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x45343671c3a3149891bf95adadc2d87c52194149') as Address;
+const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x740d9e5095acc228860509e46cfac1b8a517998c') as Address;
 const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0x0406a14729b0c77c187ac5229c8c2317589e73c0') as Address;
 
 const chainsConfig: Record<number, { public: any, wallet: any, diamond: Address }> = {
