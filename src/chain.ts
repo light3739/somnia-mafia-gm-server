@@ -176,7 +176,9 @@ export const DIAMOND_ABI = [
           { name: 'name', type: 'string' },
           { name: 'buyIn', type: 'uint128' },
           { name: 'prizePool', type: 'uint128' },
+          { name: 'sessionFee', type: 'uint128' },
           { name: 'platformFeePool', type: 'uint128' },
+
           { name: 'paymentToken', type: 'address' },
           { name: 'maxPlayers', type: 'uint8' },
           { name: 'playersPerTable', type: 'uint8' },
