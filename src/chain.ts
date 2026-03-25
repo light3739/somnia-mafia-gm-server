@@ -301,6 +301,7 @@ export async function getSessionKey(mainWallet: Address, chainId?: number) {
     abi: DIAMOND_ABI,
     functionName: 'sessionKeys',
     args: [mainWallet],
+    blockTag: 'pending',
   });
 }
 

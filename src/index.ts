@@ -303,7 +303,6 @@ async function verifyAuthorizedSignature(params: {
       }
 
       if (i < 5) {
-        console.warn(`[AUTH] Session verification attempt ${i + 1} failed for ${normalizedPlayer}, retrying in 2s...`);
         await new Promise(r => setTimeout(r, 2000));
       }
     }
