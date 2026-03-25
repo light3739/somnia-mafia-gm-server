@@ -134,6 +134,10 @@ const resolvedRoles = new Map<string, Map<string, string>>();
 // Per room: stable player order (address[] in join order) — cached on first use or restored during role computation
 const roomPlayerOrder = new Map<string, string[]>();
 
+// ─── Session Key Cache (local, replaces on-chain lookups) ───
+// mainWallet.lower() → { sessionAddress, roomId }
+const sessionCache = new Map<string, { sessionAddress: string; roomId: number }>();
+
 function getRoomMap<V>(map: Map<string, Map<string, V>>, roomId: string): Map<string, V> {
   let m = map.get(roomId);
   if (!m) { m = new Map(); map.set(roomId, m); }
@@ -275,49 +279,86 @@ async function verifyAuthorizedSignature(params: {
 
   // If modern signature was from session key, verify it's valid for main wallet
   if (normalizedSigner !== normalizedPlayer) {
-    let lastError: string = 'Session key is not registered for this player';
+    const expectedRoomId = Number(BigInt(roomId));
 
-    // Retry verification up to 6 times (total ~9-10 seconds) in case of RPC lag on Somnia
-    for (let i = 0; i < 6; i++) {
-      try {
-        const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
-        const sessionAddress = String(session.sessionAddress || '').toLowerCase();
-        const expiresAt = Number(session.expiresAt || 0);
-        const sessionRoomId = Number(session.roomId || 0);
-        const isActive = Boolean(session.isActive);
-        const expectedRoomId = Number(BigInt(roomId));
-
-        if (!sessionAddress || sessionAddress !== normalizedSigner) {
-          lastError = `Session key not registered (got ${sessionAddress || 'none'})`;
-          // Don't break, retry
-        } else if (!isActive || expiresAt <= Math.floor(Date.now() / 1000)) {
-          lastError = 'Session key inactive or expired';
-        } else if (sessionRoomId !== expectedRoomId) {
-          lastError = `Session key room mismatch (expected ${expectedRoomId}, got ${sessionRoomId})`;
-        } else {
-          // Success!
-          return { ok: true, signer: normalizedSigner };
-        }
-      } catch (e: any) {
-        lastError = `Session verification failed: ${e?.message || 'unknown error'}`;
-      }
-
-      if (i < 5) {
-        await new Promise(r => setTimeout(r, 2000));
-      }
+    // 1) Check LOCAL session cache first (instant, no RPC dependency)
+    const cached = sessionCache.get(normalizedPlayer);
+    if (cached && cached.sessionAddress === normalizedSigner && cached.roomId === expectedRoomId) {
+      return { ok: true, signer: normalizedSigner };
     }
 
-    console.error('[AUTH FAIL] Session verification failed after retries', {
-      normalizedSigner,
-      normalizedPlayer,
-      error: lastError,
-      roomId
-    });
-    return { ok: false, error: lastError, status: 403 };
+    // 2) Fallback: check on-chain (single attempt, no retries)
+    try {
+      const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
+      const sessionAddress = String(session.sessionAddress || '').toLowerCase();
+      const isActive = Boolean(session.isActive);
+      const sessionRoomId = Number(session.roomId || 0);
+
+      if (sessionAddress === normalizedSigner && isActive && sessionRoomId === expectedRoomId) {
+        // Populate cache for future calls
+        sessionCache.set(normalizedPlayer, { sessionAddress: normalizedSigner, roomId: expectedRoomId });
+        return { ok: true, signer: normalizedSigner };
+      }
+
+      console.error('[AUTH FAIL] Session mismatch', {
+        normalizedSigner,
+        normalizedPlayer,
+        onChainSession: sessionAddress,
+        cachedSession: cached?.sessionAddress || 'none',
+        roomId
+      });
+      return { ok: false, error: `Session key not registered (on-chain: ${sessionAddress}, expected: ${normalizedSigner})`, status: 403 };
+    } catch (e: any) {
+      console.error('[AUTH FAIL] On-chain session check failed', { normalizedSigner, normalizedPlayer, error: e?.message });
+      return { ok: false, error: `Session verification failed: ${e?.message}`, status: 403 };
+    }
   }
 
   return { ok: true, signer: normalizedSigner };
 }
+
+// ─── Register Session Key (local cache, no RPC needed) ────
+// Frontend calls this immediately after a successful createAndJoin / joinRoom tx.
+// The main wallet signs a message proving it owns the session key.
+app.post('/register-session', actionLimiter, async (req: express.Request, res: express.Response) => {
+  try {
+    const { mainWallet, sessionAddress, roomId, signature, nonce, timestamp, chainId } = req.body;
+    if (!mainWallet || !sessionAddress || !roomId || !signature) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const normalizedMain = mainWallet.toLowerCase();
+    const normalizedSession = sessionAddress.toLowerCase();
+    const roomNum = Number(roomId);
+
+    // Verify the signature is from the main wallet (proves ownership)
+    const tsNum = Number(timestamp);
+    const message = `register-session:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}`;
+    const valid = await verifyMessage({
+      address: normalizedMain as Address,
+      message,
+      signature: signature as `0x${string}`,
+    });
+    if (!valid) {
+      return res.status(401).json({ error: 'Invalid signature from main wallet' });
+    }
+
+    // Cache it
+    sessionCache.set(normalizedMain, { sessionAddress: normalizedSession, roomId: roomNum });
+
+    // Also persist in Redis for restarts
+    const redis = getRedis();
+    if (redis) {
+      redis.set(`gm:session:${normalizedMain}`, JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum }), 'EX', 48 * 60 * 60).catch(() => {});
+    }
+
+    console.log(`[SESSION] Cached session for ${normalizedMain} → ${normalizedSession} (room ${roomNum})`);
+    return res.json({ ok: true });
+  } catch (e: any) {
+    console.error('[SESSION] Error:', e.message);
+    return res.status(500).json({ error: e.message });
+  }
+});
 
 // ─── Health ───────────────────────────────────────────────
 app.get('/health', (_req: express.Request, res: express.Response) => {
@@ -1650,6 +1691,36 @@ async function start() {
           nightTimers.set(roomIdStr, t);
           console.log(`[startup] Room ${roomIdStr}: night in progress — timeout in ${remaining}ms`);
         }
+      }
+
+      // Restore session cache from Redis
+      try {
+        const sessionKeys: string[] = [];
+        await new Promise<void>((resolve, reject) => {
+          const stream = redisClient.scanStream({ match: 'gm:session:*', count: 200 });
+          stream.on('data', (batch: string[]) => sessionKeys.push(...batch));
+          stream.on('end', resolve);
+          stream.on('error', reject);
+        });
+        if (sessionKeys.length > 0) {
+          const pipeline = redisClient.pipeline();
+          for (const key of sessionKeys) pipeline.get(key);
+          const results = await pipeline.exec();
+          let restored = 0;
+          for (let i = 0; i < sessionKeys.length; i++) {
+            const val = results?.[i]?.[1] as string | null;
+            if (!val) continue;
+            try {
+              const data = JSON.parse(val);
+              const mainWallet = sessionKeys[i].replace('gm:session:', '');
+              sessionCache.set(mainWallet, { sessionAddress: data.sessionAddress, roomId: data.roomId });
+              restored++;
+            } catch {}
+          }
+          if (restored > 0) console.log(`[redis] Restored ${restored} session cache entries`);
+        }
+      } catch (e: any) {
+        console.warn('[redis] Failed to restore session cache:', e.message);
       }
 
       // Recompute roles for rooms where SRA keys were restored but roles weren't
