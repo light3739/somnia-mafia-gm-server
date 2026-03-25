@@ -1232,15 +1232,25 @@ app.post('/submit-sra-key', actionLimiter, async (req: express.Request, res: exp
       return res.status(signatureCheck.status).json({ error: signatureCheck.error });
     }
 
-    // Phase check
-    try {
-      const room: any = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
-      const phase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
-      if (phase !== GamePhase.REVEAL && phase !== GamePhase.ENDED) {
-        return res.status(400).json({ error: `Cannot submit SRA key outside REVEAL phase (current: ${phase})` });
+    // Phase check (retry up to 5 times for RPC sync)
+    let phaseMatch = false;
+    let lastPhase = -1;
+    for (let i = 0; i < 5; i++) {
+      try {
+        const room: any = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
+        lastPhase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
+        if (lastPhase === GamePhase.REVEAL || lastPhase === GamePhase.ENDED) {
+          phaseMatch = true;
+          break;
+        }
+      } catch (e: any) {
+        console.warn(`[submit-sra-key] Phase check attempt ${i + 1} failed for room ${roomId}: ${e.message}`);
       }
-    } catch (e: any) {
-      console.warn(`[submit-sra-key] Phase check failed for room ${roomId}: ${e.message}`);
+      if (i < 4) await new Promise(r => setTimeout(r, 2000));
+    }
+
+    if (!phaseMatch) {
+      return res.status(400).json({ error: `Cannot submit SRA key outside REVEAL phase (current: ${lastPhase})` });
     }
 
     const roomSraKeys = getRoomMap(sraSKeys, String(roomId));

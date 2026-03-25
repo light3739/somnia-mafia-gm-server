@@ -271,6 +271,7 @@ export async function getRoom(roomId: bigint, chainId?: number) {
     abi: DIAMOND_ABI,
     functionName: 'getRoom',
     args: [roomId],
+    blockTag: 'pending',
   });
 }
 
@@ -281,6 +282,7 @@ export async function getPlayers(roomId: bigint, chainId?: number) {
     abi: DIAMOND_ABI,
     functionName: 'getPlayers',
     args: [roomId],
+    blockTag: 'pending',
   });
 }
 
@@ -312,6 +314,7 @@ export async function isTournamentParticipant(tournamentId: bigint, player: Addr
     abi: DIAMOND_ABI,
     functionName: 'isTournamentParticipant',
     args: [tournamentId, player],
+    blockTag: 'pending',
   }) as Promise<boolean>;
 }
 
