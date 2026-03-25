@@ -276,9 +276,9 @@ async function verifyAuthorizedSignature(params: {
   // If modern signature was from session key, verify it's valid for main wallet
   if (normalizedSigner !== normalizedPlayer) {
     let lastError: string = 'Session key is not registered for this player';
-    
-    // Retry verification up to 4 times (total ~5 seconds) in case of RPC lag
-    for (let i = 0; i < 4; i++) {
+
+    // Retry verification up to 6 times (total ~9-10 seconds) in case of RPC lag on Somnia
+    for (let i = 0; i < 6; i++) {
       try {
         const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
         const sessionAddress = String(session.sessionAddress || '').toLowerCase();
@@ -301,16 +301,16 @@ async function verifyAuthorizedSignature(params: {
       } catch (e: any) {
         lastError = `Session verification failed: ${e?.message || 'unknown error'}`;
       }
-      
-      if (i < 3) {
-        console.warn(`[AUTH] Session verification attempt ${i+1} failed for ${normalizedPlayer}, retrying in 1.5s...`);
-        await new Promise(r => setTimeout(r, 1500));
+
+      if (i < 5) {
+        console.warn(`[AUTH] Session verification attempt ${i + 1} failed for ${normalizedPlayer}, retrying in 2s...`);
+        await new Promise(r => setTimeout(r, 2000));
       }
     }
 
-    console.error('[AUTH FAIL] Session verification failed after retries', { 
-      normalizedSigner, 
-      normalizedPlayer, 
+    console.error('[AUTH FAIL] Session verification failed after retries', {
+      normalizedSigner,
+      normalizedPlayer,
       error: lastError,
       roomId
     });
@@ -378,7 +378,7 @@ app.post('/room-password', actionLimiter, async (req: express.Request, res: expr
         room = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
         if (room && room.host && room.host !== ZERO_ADDR) break;
       } catch (e: any) {
-        console.warn(`[room-password] Room ${roomId} lookup attempt ${i+1} failed: ${e?.message || 'unknown error'}`);
+        console.warn(`[room-password] Room ${roomId} lookup attempt ${i + 1} failed: ${e?.message || 'unknown error'}`);
       }
       await new Promise(r => setTimeout(r, 1000 * (i + 1))); // exponential backoff
     }
@@ -463,14 +463,14 @@ app.post('/request-join', actionLimiter, async (req: express.Request, res: expre
     // NEW: Tournament membership check for joiner
     const room = await getRoom(BigInt(roomId), chainId);
     if (room && room.tournamentId && room.tournamentId > 0n) {
-        const tournament = await getTournament(room.tournamentId, chainId) as any;
-        if (tournament && tournament.buyIn > 0n) {
-            const isPart = await isTournamentParticipant(room.tournamentId, playerAddress as Address, chainId);
-            if (!isPart) {
-                console.error(`[request-join] Room ${roomId}: Player ${playerAddress} not in tournament ${room.tournamentId}`);
-                return res.status(403).json({ error: 'Must join tournament first' });
-            }
+      const tournament = await getTournament(room.tournamentId, chainId) as any;
+      if (tournament && tournament.buyIn > 0n) {
+        const isPart = await isTournamentParticipant(room.tournamentId, playerAddress as Address, chainId);
+        if (!isPart) {
+          console.error(`[request-join] Room ${roomId}: Player ${playerAddress} not in tournament ${room.tournamentId}`);
+          return res.status(403).json({ error: 'Must join tournament first' });
         }
+      }
     }
 
     // Password correct → sign join permit
@@ -570,12 +570,12 @@ app.post('/investigation-proof', actionLimiter, async (req: express.Request, res
     const roomRoles = resolvedRoles.get(String(rid));
     const targetRole = roomRoles?.get(target.toLowerCase()) || null;
 
-    return res.json({ 
-      ok: true, 
-      source: 'gm-proof', 
-      targetAddress: proof.targetAddress, 
+    return res.json({
+      ok: true,
+      source: 'gm-proof',
+      targetAddress: proof.targetAddress,
       role: targetRole,
-      timestamp: proof.timestamp 
+      timestamp: proof.timestamp
     });
   } catch (err: any) {
     console.error('[investigation-proof] Error:', err.message);
@@ -1019,7 +1019,7 @@ app.post('/resolve-night', heavyLimiter, async (req: express.Request, res: expre
         state.resolved = false;
         rPersistNightState(getRedis(), String(req.body.roomId), state);
       }
-    } catch (_) {}
+    } catch (_) { }
     // Signal txFailed so frontend can fall back to on-chain forcePhaseTimeout
     const isGasTxError = /gas required|insufficient funds|exceed|allowance|Execution reverted/i.test(err.message || '');
     return res.status(500).json({ error: err.message, gmTxFailed: isGasTxError });
@@ -1107,7 +1107,7 @@ app.get('/room/:roomId', pollLimiter, async (req: express.Request, res: express.
 // ─── Register ECIES Public Key ────────────────────────────
 app.post('/register-pubkey', actionLimiter, async (req: express.Request, res: express.Response) => {
   const { roomId, playerAddress, pubkey, signature, signerAddress, nonce, timestamp, chainId } = req.body;
-  
+
   if (!roomId || !playerAddress || !pubkey || !signature) {
     return res.status(400).json({ error: 'Missing req fields: roomId, playerAddress, pubkey, signature' });
   }
@@ -1302,7 +1302,7 @@ app.get('/my-role/:roomId', pollLimiter, async (req: express.Request, res: expre
 
     // Get players from chain to find this player's deck index
     const players = await getPlayers(rid, chainIdNum) as any[];
-    
+
     // Check stable order
     const roomKey = String(roomId);
     let stableOrder = roomPlayerOrder.get(roomKey);
@@ -1378,11 +1378,11 @@ app.get('/room-roles/:roomId', pollLimiter, async (req: express.Request, res: ex
     // Since this is a public endpoint, we must hide active roles.
     const room: any = await getRoom(rid, chainIdNum);
     const phase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
-    
+
     // Check if player is authenticated via query signature (for Mafia fetching teammates)
     const { playerAddress, signature, nonce, timestamp } = req.query as Record<string, string>;
     let isVerifiedMafia = false;
-    
+
     if (playerAddress && signature && nonce && timestamp) {
       const sigCheck = await verifyAuthorizedSignature({
         roomId: String(roomId),
@@ -1720,32 +1720,32 @@ app.post('/end-game-zk/:roomId', heavyLimiter, async (req: express.Request, res:
 
     const secrets = await ServerStore.getRoomSecrets(roomId);
     if (!secrets) {
-        return res.status(400).json({ error: "No secrets for room" });
+      return res.status(400).json({ error: "No secrets for room" });
     }
 
     const players = await getPlayers(rid, chainId);
     const zkPlayers = players.map((p: any) => {
-        const addr = p.wallet.toLowerCase();
-        const secret = secrets[addr];
-        const isAlive = (Number(p.flags) & FLAGS.ACTIVE) !== 0;
+      const addr = p.wallet.toLowerCase();
+      const secret = secrets[addr];
+      const isAlive = (Number(p.flags) & FLAGS.ACTIVE) !== 0;
 
-        if (isAlive && !secret?.salt) {
-            console.error(`[ZK] Missing salt for alive player ${addr}`);
-            // Don't throw if we can't find it for some reason? 
-            // Better to throw so we don't generate invalid proof.
-            throw new Error(`Missing salt for alive player ${addr}`);
-        }
+      if (isAlive && !secret?.salt) {
+        console.error(`[ZK] Missing salt for alive player ${addr}`);
+        // Don't throw if we can't find it for some reason? 
+        // Better to throw so we don't generate invalid proof.
+        throw new Error(`Missing salt for alive player ${addr}`);
+      }
 
-        return {
-            role:       secret?.role === 1 ? 1 : 0,
-            salt:       (isAlive && secret) ? secret.salt : "0".repeat(64),
-            commitment: (isAlive && secret) ? secret.commitment : "0",
-            isActive:   isAlive ? 1 : 0,
-        };
+      return {
+        role: secret?.role === 1 ? 1 : 0,
+        salt: (isAlive && secret) ? secret.salt : "0".repeat(64),
+        commitment: (isAlive && secret) ? secret.commitment : "0",
+        isActive: isAlive ? 1 : 0,
+      };
     });
 
     const callData = await zkMutex.runExclusive(async () => {
-        return generateEndGameProof(roomId, zkPlayers);
+      return generateEndGameProof(roomId, zkPlayers);
     });
     console.log(`[ZK] Proof generated successfully for Room #${roomId}`);
     res.json({ callData });
