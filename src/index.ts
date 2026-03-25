@@ -322,7 +322,7 @@ async function verifyAuthorizedSignature(params: {
 // The main wallet signs a message proving it owns the session key.
 app.post('/register-session', actionLimiter, async (req: express.Request, res: express.Response) => {
   try {
-    const { mainWallet, sessionAddress, roomId, signature, nonce, timestamp, chainId } = req.body;
+    const { mainWallet, sessionAddress, roomId, signature, signerAddress, nonce, timestamp, chainId } = req.body;
     if (!mainWallet || !sessionAddress || !roomId || !signature) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
@@ -331,16 +331,24 @@ app.post('/register-session', actionLimiter, async (req: express.Request, res: e
     const normalizedSession = sessionAddress.toLowerCase();
     const roomNum = Number(roomId);
 
-    // Verify the signature is from the main wallet (proves ownership)
+    // Verify signature — accept from EITHER session key OR main wallet
     const tsNum = Number(timestamp);
     const message = `register-session:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}`;
+    
+    const normalizedSigner = (signerAddress || mainWallet).toLowerCase();
+    
+    // The signer must be either the session key or the main wallet
+    if (normalizedSigner !== normalizedSession && normalizedSigner !== normalizedMain) {
+      return res.status(401).json({ error: 'Signer must be session key or main wallet' });
+    }
+
     const valid = await verifyMessage({
-      address: normalizedMain as Address,
+      address: normalizedSigner as Address,
       message,
       signature: signature as `0x${string}`,
     });
     if (!valid) {
-      return res.status(401).json({ error: 'Invalid signature from main wallet' });
+      return res.status(401).json({ error: 'Invalid signature' });
     }
 
     // Cache it
