@@ -337,9 +337,10 @@ app.post('/register-session', actionLimiter, async (req: express.Request, res: e
     
     const normalizedSigner = (signerAddress || mainWallet).toLowerCase();
     
-    // The signer must be either the session key or the main wallet
-    if (normalizedSigner !== normalizedSession && normalizedSigner !== normalizedMain) {
-      return res.status(401).json({ error: 'Signer must be session key or main wallet' });
+    // The signer must be the main wallet to authorize a session key mapping.
+    // If we allowed the session key to sign, anyone could hijack any address.
+    if (normalizedSigner !== normalizedMain) {
+      return res.status(401).json({ error: 'Only main wallet can authorize a session key' });
     }
 
     const valid = await verifyMessage({
