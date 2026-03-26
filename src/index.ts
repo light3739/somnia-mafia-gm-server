@@ -5,7 +5,7 @@
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
-import { verifyMessage, type Address } from 'viem';
+import { verifyMessage, type Address, recoverMessageAddress } from 'viem';
 import {
   getRoom,
   getPlayers,
@@ -331,30 +331,35 @@ app.post('/register-session', actionLimiter, async (req: express.Request, res: e
     const normalizedSession = sessionAddress.toLowerCase();
     const roomNum = Number(roomId);
 
-    // Verify signature — accept from EITHER session key OR main wallet
     const tsNum = Number(timestamp);
     const message = `register-session:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}`;
-    
-    const normalizedSigner = (signerAddress || mainWallet).toLowerCase();
-    
-    // Verify the message before checking signer mapping
+
+    // Recover address from signature directly
+    let recoveredAddress: string;
+    try {
+      const recoveredFull = await recoverMessageAddress({
+        message,
+        signature: signature as `0x${string}`,
+      });
+      recoveredAddress = recoveredFull.toLowerCase();
+    } catch (e: any) {
+      console.log('[REG-SESSION FAIL] Recovery failed', e.message);
+      return res.status(401).json({ error: 'Signature verification failed' });
+    }
+
+    if (recoveredAddress !== normalizedMain) {
+      console.log('[REG-SESSION FAIL] Signer mismatch', { recoveredAddress, normalizedMain });
+      return res.status(401).json({ error: 'Only main wallet can authorize a session key' });
+    }
+
+    // Double check with verifyMessage just to be safe
     const valid = await verifyMessage({
-      address: normalizedSigner as Address,
+      address: recoveredAddress as Address,
       message,
       signature: signature as `0x${string}`,
     });
-
     if (!valid) {
-      console.log('[REG-SESSION FAIL] Invalid signature for', normalizedSigner);
       return res.status(401).json({ error: 'Invalid signature' });
-    }
-
-    // Recovered address from signature MUST match mainWallet
-    // Actually, verifyMessage already checked that if we passed it.
-    
-    if (normalizedSigner !== normalizedMain) {
-      console.log('[REG-SESSION FAIL] Signer mismatch', { normalizedSigner, normalizedMain });
-      return res.status(401).json({ error: 'Only main wallet can authorize a session key' });
     }
 
     // Cache it
