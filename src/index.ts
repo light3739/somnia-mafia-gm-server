@@ -337,19 +337,24 @@ app.post('/register-session', actionLimiter, async (req: express.Request, res: e
     
     const normalizedSigner = (signerAddress || mainWallet).toLowerCase();
     
-    // The signer must be the main wallet to authorize a session key mapping.
-    // If we allowed the session key to sign, anyone could hijack any address.
-    if (normalizedSigner !== normalizedMain) {
-      return res.status(401).json({ error: 'Only main wallet can authorize a session key' });
-    }
-
+    // Verify the message before checking signer mapping
     const valid = await verifyMessage({
       address: normalizedSigner as Address,
       message,
       signature: signature as `0x${string}`,
     });
+
     if (!valid) {
+      console.log('[REG-SESSION FAIL] Invalid signature for', normalizedSigner);
       return res.status(401).json({ error: 'Invalid signature' });
+    }
+
+    // Recovered address from signature MUST match mainWallet
+    // Actually, verifyMessage already checked that if we passed it.
+    
+    if (normalizedSigner !== normalizedMain) {
+      console.log('[REG-SESSION FAIL] Signer mismatch', { normalizedSigner, normalizedMain });
+      return res.status(401).json({ error: 'Only main wallet can authorize a session key' });
     }
 
     // Cache it
