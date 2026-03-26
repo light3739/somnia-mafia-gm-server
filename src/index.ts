@@ -1243,10 +1243,10 @@ app.post('/submit-sra-key', actionLimiter, async (req: express.Request, res: exp
       return res.status(signatureCheck.status).json({ error: signatureCheck.error });
     }
 
-    // Phase check (retry up to 5 times for RPC sync)
+    // Phase check (retry up to 10 times for RPC sync)
     let phaseMatch = false;
     let lastPhase = -1;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       try {
         const room: any = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
         lastPhase = Array.isArray(room) ? Number(room[3]) : Number(room.phase);
@@ -1257,7 +1257,7 @@ app.post('/submit-sra-key', actionLimiter, async (req: express.Request, res: exp
       } catch (e: any) {
         console.warn(`[submit-sra-key] Phase check attempt ${i + 1} failed for room ${roomId}: ${e.message}`);
       }
-      if (i < 4) await new Promise(r => setTimeout(r, 2000));
+      if (i < 9) await new Promise(r => setTimeout(r, 1000));
     }
 
     if (!phaseMatch) {
