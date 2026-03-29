@@ -1,19 +1,24 @@
 /**
  * routes/sessionRoutes.ts
- * POST /register-session  — cache session key local + Redis
- * GET  /health            — health check
  */
 import { Router } from 'express';
 import { verifyMessage, type Address } from 'viem';
 import { recoverMessageAddress } from '../auth/verifySignature.js';
-import { sessionCache } from '../stores/index.js';
-import { getRedis } from '../redis.js';
+import type { GMStore } from '../stores/index.js';
 import { GM_ADDRESS } from '../chain.js';
 import { getAllNightStates } from '../game-state.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
+import type { RedisClient } from '../redis.js';
 
-export function createSessionRoutes(actionLimiter: RateLimitRequestHandler) {
+export interface SessionRoutesContext {
+  store: GMStore;
+  redis: RedisClient;
+  actionLimiter: RateLimitRequestHandler;
+}
+
+export function createSessionRoutes(ctx: SessionRoutesContext) {
   const router = Router();
+  const { store, redis, actionLimiter } = ctx;
 
   // ── Health ────────────────────────────────────────────────
   router.get('/health', (_req, res) => {
@@ -30,7 +35,7 @@ export function createSessionRoutes(actionLimiter: RateLimitRequestHandler) {
     try {
       const { mainWallet, sessionAddress, roomId, signature, nonce, timestamp } = req.body;
       if (!mainWallet || !sessionAddress || !roomId || !signature) {
-        return res.status(400).json({ error: 'Missing required fields' });
+        return res.status(400).json({ error: 'Missing req fields' });
       }
 
       const normalizedMain = mainWallet.toLowerCase();
@@ -58,24 +63,22 @@ export function createSessionRoutes(actionLimiter: RateLimitRequestHandler) {
       });
       if (!valid) return res.status(401).json({ error: 'Invalid signature' });
 
-      sessionCache.set(normalizedMain, { sessionAddress: normalizedSession, roomId: roomNum });
+      // Injected store usage
+      store.sessionCache.set(normalizedMain, { sessionAddress: normalizedSession, roomId: roomNum });
 
-      const redis = getRedis();
+      // Injected redis usage
       if (redis) {
-        redis
-          .set(
-            `gm:session:${normalizedMain}`,
-            JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum }),
-            'EX',
-            48 * 60 * 60,
-          )
-          .catch(() => {});
+        redis.set(
+          `gm:session:${normalizedMain}`,
+          JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum }),
+          'EX',
+          48 * 60 * 60,
+        ).catch(() => {});
       }
 
       console.log(`[SESSION] Cached session for ${normalizedMain} → ${normalizedSession} (room ${roomNum})`);
       return res.json({ ok: true });
     } catch (e: any) {
-      console.error('[SESSION] Error:', e.message);
       return res.status(500).json({ error: e.message });
     }
   });
