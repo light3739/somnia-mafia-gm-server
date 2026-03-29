@@ -282,7 +282,27 @@ async function verifyAuthorizedSignature(params: {
     const expectedRoomId = Number(BigInt(roomId));
 
     // 1) Check LOCAL session cache first (instant, no RPC dependency)
-    const cached = sessionCache.get(normalizedPlayer);
+    let cached = sessionCache.get(normalizedPlayer);
+    
+    // 1.5) Try Redis if local cache miss
+    if (!cached) {
+      const redis = getRedis();
+      if (redis) {
+        try {
+          const stored = await redis.get(`gm:session:${normalizedPlayer}`);
+          if (stored) {
+            cached = JSON.parse(stored);
+            if (cached) {
+              sessionCache.set(normalizedPlayer, cached);
+              console.log(`[AUTH] Restored session for ${normalizedPlayer} from Redis`);
+            }
+          }
+        } catch (e) {
+          console.warn(`[AUTH] Redis fetch failed for ${normalizedPlayer}`);
+        }
+      }
+    }
+
     if (cached && cached.sessionAddress === normalizedSigner && cached.roomId === expectedRoomId) {
       return { ok: true, signer: normalizedSigner };
     }
