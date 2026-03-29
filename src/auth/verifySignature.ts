@@ -51,7 +51,7 @@ export function createAuthService(ctx: AuthContext) {
         }
 
         const scope = params.nonceScope || 'default';
-        const isFirstTime = await ServerStore.consumeReplayNonce(scope, roomId, normalizedSigner, nonce);
+        const isFirstTime = await ServerStore.consumeReplayNonce(scope, roomId, normalizedSigner, nonce, undefined, chainId);
         if (!isFirstTime) {
           return { ok: false, error: 'Nonce already used (potential replay)', status: 401 };
         }
@@ -79,37 +79,39 @@ export function createAuthService(ctx: AuthContext) {
     // 3. Session key resolution (Signer vs Player)
     if (normalizedSigner !== normalizedPlayer) {
       const expectedRoomId = Number(BigInt(roomId));
+      const effectiveChainId = Number(chainId || 43113);
+      const cacheKey = `${effectiveChainId}:${normalizedPlayer}`;
 
       // a) Check local cache
-      let cached = store.sessionCache.get(normalizedPlayer);
+      let cached = store.sessionCache.get(cacheKey);
 
       // b) Redis fallback
       if (!cached && redis) {
         try {
-          const stored = await redis.get(`gm:session:${normalizedPlayer}`);
+          const stored = await redis.get(`gm:session:${cacheKey}`);
           if (stored) {
             cached = JSON.parse(stored);
             if (cached) {
-              store.sessionCache.set(normalizedPlayer, cached);
+              store.sessionCache.set(cacheKey, cached);
             }
           }
         } catch { /* log fallback silently */ }
       }
 
-      if (cached && cached.sessionAddress === normalizedSigner && cached.roomId === expectedRoomId) {
+      if (cached && cached.sessionAddress === normalizedSigner && cached.roomId === expectedRoomId && cached.chainId === effectiveChainId) {
         return { ok: true, signer: normalizedSigner };
       }
 
       // c) On-chain fallback with retry
       for (let attempt = 0; attempt < 5; attempt++) {
         try {
-          const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
+          const session = await getSessionKey(normalizedPlayer as Address, effectiveChainId) as any;
           const sessionAddress = String(session.sessionAddress || '').toLowerCase();
           const isActive = Boolean(session.isActive);
           const sessionRoomId = Number(session.roomId || 0);
 
           if (sessionAddress === normalizedSigner && isActive && sessionRoomId === expectedRoomId) {
-            store.sessionCache.set(normalizedPlayer, { sessionAddress: normalizedSigner, roomId: expectedRoomId });
+            store.sessionCache.set(cacheKey, { sessionAddress: normalizedSigner, roomId: expectedRoomId, chainId: effectiveChainId });
             return { ok: true, signer: normalizedSigner };
           }
           if (attempt < 4) await new Promise(r => setTimeout(r, 2000));

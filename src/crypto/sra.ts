@@ -33,14 +33,16 @@ export function getCardOffset(roomId: number): number {
   return 100 + ((roomId * 7919 + 104729) % 10000);
 }
 
-export function roleFromCardValue(cardValue: string, roomId: number): string {
+import { Role } from '../types/contract.js';
+
+export function roleFromCardValue(cardValue: string, roomId: number): Role {
   const offset = getCardOffset(roomId);
   const n = parseInt(cardValue) - offset;
   switch (n) {
-    case 1: return 'MAFIA';
-    case 2: return 'DOCTOR';
-    case 3: return 'DETECTIVE';
-    case 4: return 'CIVILIAN';
-    default: return 'UNKNOWN';
+    case 1: return Role.MAFIA;
+    case 2: return Role.DOCTOR;
+    case 3: return Role.DETECTIVE;
+    case 4: return Role.CITIZEN;
+    default: return Role.NONE;
   }
 }

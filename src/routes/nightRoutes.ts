@@ -4,9 +4,10 @@
 import { Router } from 'express';
 import { type Address } from 'viem';
 import {
-  getRoom, getPlayers, resolveNight, hasCommittedRole, getChainConfig,
+  getRoom, getPlayers, resolveNight, hasCommittedRole,
   GM_ADDRESS, FLAGS, GamePhase,
 } from '../chain.js';
+import { Role } from '../types/contract.js';
 import {
   getOrCreateNightState, getNightState, clearNightState,
   calculateMafiaConsensus, getDoctorHeal, type NightAction,
@@ -27,6 +28,7 @@ function clearNightTimer(roomIdStr: string): void {
 export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): Promise<void> {
   const state = getNightState(rid);
   if (!state || state.resolved) return;
+  const effectiveChainId = chainId || state.chainId;
   if (state.actions.size === 0) return;
 
   state.resolved = true;
@@ -37,12 +39,12 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
 
   let totalAliveMafia: number | undefined;
   try {
-    const players = await getPlayers(rid, chainId as any) as any[];
+    const players = await getPlayers(rid, effectiveChainId as any);
     const roomRoles = store.resolvedRoles.get(String(rid));
     if (roomRoles) {
-      totalAliveMafia = players.filter((p: any) =>
+      totalAliveMafia = players.filter((p) =>
         !!(Number(p.flags) & FLAGS.ACTIVE) &&
-        roomRoles.get(p.wallet.toLowerCase()) === 'MAFIA',
+        roomRoles.get(p.wallet.toLowerCase()) === Role.MAFIA,
       ).length;
     }
   } catch { /* ... */ }
@@ -51,11 +53,11 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
   const healTarget = getDoctorHeal(allActions);
 
   try {
-    await resolveNight(rid, killTarget, healTarget, chainId as any);
+    await resolveNight(rid, killTarget, healTarget, effectiveChainId as any);
   } catch (err: any) {
     if (getNightState(rid)) {
       getNightState(rid)!.resolved = false;
-      if (redis) rPersistNightState(redis, String(rid), getNightState(rid)!); 
+      if (redis) rPersistNightState(redis, String(rid), getNightState(rid)!);
     }
     throw err;
   } finally {
@@ -92,16 +94,16 @@ export function createNightRoutes(ctx: NightRoutesContext) {
   const router = Router();
   const { store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter, heavyLimiter } = ctx;
 
-  const allRolePlayersActed = (roomIdStr: string, alivePlayers: any[]) => {
+  const allRolePlayersActed = (roomIdStr: string, alivePlayers: ReturnType<typeof Array.prototype.filter>) => {
     const roles = store.resolvedRoles.get(roomIdStr);
     if (!roles) return false;
-    const roleActors = alivePlayers.filter((p: any) => {
+    const roleActors = alivePlayers.filter((p) => {
       const r = roles.get(p.wallet.toLowerCase());
-      return r && r !== 'CIVILIAN';
+      return r !== undefined && r !== Role.CITIZEN && r !== Role.NONE;
     });
     if (roleActors.length === 0) return false;
     const state = getNightState(BigInt(roomIdStr));
-    return state && roleActors.every((p: any) => state.actions.has(p.wallet.toLowerCase()));
+    return state && roleActors.every((p) => state.actions.has(p.wallet.toLowerCase()));
   };
 
   router.post('/night-action', actionLimiter, async (req, res) => {
@@ -124,11 +126,11 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
       const rid = BigInt(roomId);
-      const room: any = await getRoom(rid, chainId);
+      const room = await getRoom(rid, chainId);
       if (Number(room.phase) !== GamePhase.NIGHT) return res.status(400).json({ error: 'Not NIGHT phase' });
 
       const players = await getPlayers(rid, chainId);
-      const player = players.find((p: any) => p.wallet.toLowerCase() === String(playerAddress).toLowerCase());
+      const player = players.find((p) => p.wallet.toLowerCase() === String(playerAddress).toLowerCase());
       if (!player || !(Number(player.flags) & FLAGS.ACTIVE)) return res.status(400).json({ error: 'Dead/Not in room' });
 
       const committed = await hasCommittedRole(rid, playerAddress as Address, chainId);
@@ -136,12 +138,13 @@ export function createNightRoutes(ctx: NightRoutesContext) {
 
       const roomRoles = store.resolvedRoles.get(String(roomId));
       const playerRole = roomRoles?.get(String(playerAddress).toLowerCase());
-      if (playerRole) {
-        const required = { kill: 'MAFIA', heal: 'DOCTOR', check: 'DETECTIVE' }[actionType as 'kill' | 'heal' | 'check'];
-        if (required && playerRole !== required) return res.status(403).json({ error: `Requires ${required}` });
+      if (playerRole !== undefined) {
+        const required: Record<string, Role> = { kill: Role.MAFIA, heal: Role.DOCTOR, check: Role.DETECTIVE };
+        const req = required[actionType as string];
+        if (req !== undefined && playerRole !== req) return res.status(403).json({ error: `Requires role ${req}` });
       }
 
-      const state = getOrCreateNightState(rid);
+      const state = getOrCreateNightState(rid, Number(chainId));
       if (state.resolved) return res.status(400).json({ error: 'Night already resolved' });
 
       state.actions.set(String(playerAddress).toLowerCase(), {
@@ -154,7 +157,7 @@ export function createNightRoutes(ctx: NightRoutesContext) {
 
       if (actionType === 'check') {
         store.getRoomMap(store.investigationProofs, String(roomId)).set(String(playerAddress).toLowerCase(), {
-          targetAddress: String(targetAddress), timestamp: Date.now(),
+          targetAddress: targetAddress as Address, timestamp: Date.now(),
         });
       }
 
@@ -187,8 +190,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
       const rid = BigInt(roomId);
-      const room: any = await getRoom(rid, chainId);
-      const host = (room.host || '').toLowerCase();
+      const room = await getRoom(rid, chainId);
+      const host = (room.host as string).toLowerCase();
       const isHostOrGM = String(mainWallet).toLowerCase() === host || sigCheck.signer === host || String(mainWallet).toLowerCase() === GM_ADDRESS.toLowerCase();
       
       if (!isHostOrGM && !(Number(room.phaseDeadline) > 0 && Math.floor(Date.now() / 1000) > Number(room.phaseDeadline) + 30)) {

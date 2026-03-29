@@ -3,6 +3,7 @@
  */
 import { Router } from 'express';
 import { getRoom, getPlayers, getChainConfig, DIAMOND_ABI, FLAGS, GamePhase } from '../chain.js';
+import { Role } from '../types/contract.js';
 import { eciesEncrypt } from '../ecies.js';
 import { sraDecryptCard, roleFromCardValue } from '../crypto/sra.js';
 import type { GMStore } from '../stores/index.js';
@@ -41,8 +42,11 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     }
 
     store.getRoomMap(store.eciesPubkeys, String(roomId)).set(normalizedAddr, pubkey);
-    const { rPersistPubkey } = await import('../redis.js');
-    if (redis) rPersistPubkey(redis, String(roomId), normalizedAddr, pubkey);
+    const { rPersistPubkey, rPersistRoomChain } = await import('../redis.js');
+    if (redis) {
+      rPersistPubkey(redis, String(roomId), normalizedAddr, pubkey);
+      rPersistRoomChain(redis, String(roomId), Number(chainId));
+    }
     
     return res.json({ ok: true });
   });
@@ -61,21 +65,24 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       const roomSraKeys = store.getRoomMap(store.sraSKeys, String(roomId));
       const normalizedPlayer = String(playerAddress).toLowerCase();
       roomSraKeys.set(normalizedPlayer, String(sraKey));
-      const { rPersistSraKey, rPersistRole } = await import('../redis.js');
-      if (redis) rPersistSraKey(redis, String(roomId), normalizedPlayer, String(sraKey));
+      const { rPersistSraKey, rPersistRole, rPersistRoomChain } = await import('../redis.js');
+      if (redis) {
+        rPersistSraKey(redis, String(roomId), normalizedPlayer, String(sraKey));
+        rPersistRoomChain(redis, String(roomId), Number(chainId));
+      }
 
       // Try pre-cache
-      const players = await getPlayers(BigInt(roomId), chainId) as any[];
-      const activePlayers = players.filter((p: any) => (Number(p.flags) & FLAGS.ACTIVE) !== 0);
-      const activeAddrs = activePlayers.map((p: any) => p.wallet.toLowerCase());
+      const players = await getPlayers(BigInt(roomId), chainId);
+      const activePlayers = players.filter((p) => (Number(p.flags) & FLAGS.ACTIVE) !== 0);
+      const activeAddrs = activePlayers.map((p) => p.wallet.toLowerCase());
       if (activeAddrs.every(addr => roomSraKeys.has(addr))) {
         const { public: publicClient, diamond } = getChainConfig(chainId);
         const deck = await publicClient.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [BigInt(roomId)] }) as string[];
-        const order = store.roomPlayerOrder.get(String(roomId)) || players.map(p => p.wallet.toLowerCase());
+        const order = (store.roomPlayerOrder.get(String(roomId)) || players.map(p => p.wallet.toLowerCase())) as `0x${string}`[];
         store.roomPlayerOrder.set(String(roomId), order);
         const allKeys = players.map(p => roomSraKeys.get(p.wallet.toLowerCase())).filter(Boolean) as string[];
         const roomRoles = store.getRoomMap(store.resolvedRoles, String(roomId));
-        order.forEach((addr: string, i: number) => {
+        order.forEach((addr, i) => {
           if (i < deck.length) {
             const role = roleFromCardValue(sraDecryptCard(deck[i], allKeys), Number(roomId));
             roomRoles.set(addr, role);
@@ -110,8 +117,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
         return res.status(202).json({ pending: true, message: 'Retry shortly' });
       }
 
-      const encrypted = eciesEncrypt(pubkey, role);
-      return res.json({ encrypted });
+      const encrypted = eciesEncrypt(pubkey, String(role)); // encode as string for ECIES
+      return res.json({ encrypted, roleId: role });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -121,8 +128,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     // Implement game-ended check + role returning logic...
     const cached = store.resolvedRoles.get(String(req.params.roomId));
     if (!cached) return res.status(202).json({ pending: true });
-    const result: Record<string, string> = {};
-    for (const [addr, role] of cached) result[addr.toLowerCase()] = role;
+    const result: Record<string, number> = {};
+    for (const [addr, role] of cached) result[addr.toLowerCase()] = role as number;
     return res.json({ roles: result });
   });
 

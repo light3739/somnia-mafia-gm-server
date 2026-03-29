@@ -1,1339 +1,8 @@
+/**
+ * 💎 Mafia Diamond Contract ABI
+ * AUTO-GENERATED - DO NOT EDIT
+ */
 export const DIAMOND_ABI = [
-  {
-    "inputs": [],
-    "name": "AlreadyCommitted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "AlreadyRevealed",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "AlreadySharedKeys",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ArrayTooLarge",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ContractPaused",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidArrayLength",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidDeckSize",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidReveal",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidSessionAddress",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidSessionKey",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotParticipant",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotYourTurn",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "PhaseDeadlinePassed",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "PlayerInactive",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Reentrancy",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "RoleAlreadyCommitted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "RoleNotCommitted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "SessionExpired",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "SessionNotForThisRoom",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "WrongPhase",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "AllKeysShared",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "AllRolesConfirmed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "dayNumber",
-        "type": "uint256"
-      }
-    ],
-    "name": "DayStarted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes32",
-        "name": "commitHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "DeckCommitted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "string[]",
-        "name": "deck",
-        "type": "string[]"
-      }
-    ],
-    "name": "DeckRevealed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "from",
-        "type": "address"
-      }
-    ],
-    "name": "KeysSharedToAll",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes32",
-        "name": "commitHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "RoleCommitted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      }
-    ],
-    "name": "RoleConfirmed",
-    "type": "event"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "roleHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "commitAndConfirmRole",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "deckHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "commitDeck",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "roleHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "commitRole",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "confirmRole",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256",
-        "name": "index",
-        "type": "uint256"
-      }
-    ],
-    "name": "getRevealedDeck",
-    "outputs": [
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string[]",
-        "name": "deck",
-        "type": "string[]"
-      },
-      {
-        "internalType": "string",
-        "name": "salt",
-        "type": "string"
-      }
-    ],
-    "name": "revealDeck",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address[]",
-        "name": "recipients",
-        "type": "address[]"
-      },
-      {
-        "internalType": "bytes[]",
-        "name": "encryptedKeys",
-        "type": "bytes[]"
-      }
-    ],
-    "name": "shareKeysToAll",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "AlreadyClaimed",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "AlreadyJoined",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ContractPaused",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InsufficientDeposit",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidPlayerCount",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidSessionAddress",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NicknameTooLong",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "PublicKeyTooLong",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Reentrancy",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "RoomFull",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "RoomNameTooLong",
-    "type": "error"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
-      }
-    ],
-    "name": "SafeERC20FailedOperation",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "SessionAlreadyRegistered",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Unauthorized",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "WrongPhase",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "DepositCollected",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "nickname",
-        "type": "string"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "sessionKey",
-        "type": "address"
-      }
-    ],
-    "name": "PlayerJoined",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "winner",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint128",
-        "name": "amount",
-        "type": "uint128"
-      }
-    ],
-    "name": "PrizeDistributed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "host",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "name",
-        "type": "string"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "maxPlayers",
-        "type": "uint256"
-      }
-    ],
-    "name": "RoomCreated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "mainWallet",
-        "type": "address"
-      },
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "sessionKey",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "expiresAt",
-        "type": "uint256"
-      }
-    ],
-    "name": "SessionKeyRegistered",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      }
-    ],
-    "name": "TournamentCancelled",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "organizer",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "name",
-        "type": "string"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "buyIn",
-        "type": "uint256"
-      }
-    ],
-    "name": "TournamentCreated",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      }
-    ],
-    "name": "TournamentJoined",
-    "type": "event"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address[]",
-        "name": "players",
-        "type": "address[]"
-      }
-    ],
-    "name": "addToTournamentWhitelist",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      }
-    ],
-    "name": "cancelTournament",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "name",
-        "type": "string"
-      },
-      {
-        "internalType": "uint128",
-        "name": "buyIn",
-        "type": "uint128"
-      },
-      {
-        "internalType": "uint8",
-        "name": "maxPlayers",
-        "type": "uint8"
-      },
-      {
-        "internalType": "uint8",
-        "name": "playersPerTable",
-        "type": "uint8"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "passwordHash",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "address",
-        "name": "paymentToken",
-        "type": "address"
-      },
-      {
-        "internalType": "uint128",
-        "name": "initialPrize",
-        "type": "uint128"
-      },
-      {
-        "internalType": "uint128",
-        "name": "sessionFee",
-        "type": "uint128"
-      }
-    ],
-    "name": "createTournament",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "string",
-        "name": "name",
-        "type": "string"
-      },
-      {
-        "internalType": "uint128",
-        "name": "buyIn",
-        "type": "uint128"
-      },
-      {
-        "internalType": "uint8",
-        "name": "maxPlayers",
-        "type": "uint8"
-      },
-      {
-        "internalType": "uint8",
-        "name": "playersPerTable",
-        "type": "uint8"
-      },
-      {
-        "internalType": "bytes32",
-        "name": "tournamentPasswordHash",
-        "type": "bytes32"
-      },
-      {
-        "internalType": "address",
-        "name": "paymentToken",
-        "type": "address"
-      },
-      {
-        "internalType": "uint128",
-        "name": "initialPrize",
-        "type": "uint128"
-      },
-      {
-        "internalType": "uint128",
-        "name": "sessionFee",
-        "type": "uint128"
-      },
-      {
-        "internalType": "string",
-        "name": "roomName",
-        "type": "string"
-      },
-      {
-        "internalType": "string",
-        "name": "nickname",
-        "type": "string"
-      },
-      {
-        "internalType": "bytes",
-        "name": "publicKey",
-        "type": "bytes"
-      },
-      {
-        "internalType": "address",
-        "name": "sessionAddress",
-        "type": "address"
-      },
-      {
-        "internalType": "bool",
-        "name": "isPrivate",
-        "type": "bool"
-      },
-      {
-        "internalType": "string",
-        "name": "joinPassword",
-        "type": "string"
-      }
-    ],
-    "name": "createTournamentAndRoom",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "distributeMafiaPrizes",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      }
-    ],
-    "name": "getTournament",
-    "outputs": [
-      {
-        "components": [
-          {
-            "internalType": "uint256",
-            "name": "id",
-            "type": "uint256"
-          },
-          {
-            "internalType": "address",
-            "name": "organizer",
-            "type": "address"
-          },
-          {
-            "internalType": "string",
-            "name": "name",
-            "type": "string"
-          },
-          {
-            "internalType": "uint128",
-            "name": "buyIn",
-            "type": "uint128"
-          },
-          {
-            "internalType": "uint128",
-            "name": "prizePool",
-            "type": "uint128"
-          },
-          {
-            "internalType": "uint128",
-            "name": "sessionFee",
-            "type": "uint128"
-          },
-          {
-            "internalType": "uint128",
-            "name": "platformFeePool",
-            "type": "uint128"
-          },
-          {
-            "internalType": "address",
-            "name": "paymentToken",
-            "type": "address"
-          },
-          {
-            "internalType": "uint8",
-            "name": "maxPlayers",
-            "type": "uint8"
-          },
-          {
-            "internalType": "uint8",
-            "name": "playersPerTable",
-            "type": "uint8"
-          },
-          {
-            "internalType": "uint8",
-            "name": "currentRound",
-            "type": "uint8"
-          },
-          {
-            "internalType": "enum MafiaTypes.TournamentPhase",
-            "name": "phase",
-            "type": "uint8"
-          },
-          {
-            "internalType": "bytes32",
-            "name": "passwordHash",
-            "type": "bytes32"
-          },
-          {
-            "internalType": "bool",
-            "name": "prizesClaimed",
-            "type": "bool"
-          },
-          {
-            "internalType": "uint32",
-            "name": "registrationDeadline",
-            "type": "uint32"
-          },
-          {
-            "internalType": "address[]",
-            "name": "participants",
-            "type": "address[]"
-          }
-        ],
-        "internalType": "struct MafiaTypes.Tournament",
-        "name": "",
-        "type": "tuple"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      }
-    ],
-    "name": "isTournamentParticipant",
-    "outputs": [
-      {
-        "internalType": "bool",
-        "name": "",
-        "type": "bool"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "password",
-        "type": "string"
-      }
-    ],
-    "name": "joinTournament",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "tournamentPassword",
-        "type": "string"
-      },
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "nickname",
-        "type": "string"
-      },
-      {
-        "internalType": "bytes",
-        "name": "publicKey",
-        "type": "bytes"
-      },
-      {
-        "internalType": "address",
-        "name": "sessionAddress",
-        "type": "address"
-      },
-      {
-        "internalType": "bytes",
-        "name": "gmSignature",
-        "type": "bytes"
-      }
-    ],
-    "name": "joinTournamentAndRoom",
-    "outputs": [],
-    "stateMutability": "payable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address[]",
-        "name": "players",
-        "type": "address[]"
-      }
-    ],
-    "name": "removeFromTournamentWhitelist",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "tournamentId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "bool",
-        "name": "enabled",
-        "type": "bool"
-      }
-    ],
-    "name": "toggleTournamentWhitelist",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "AlreadyVoted",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "ContractPaused",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "InvalidSessionKey",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotParticipant",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "PhaseDeadlinePassed",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "PlayerInactive",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Reentrancy",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "SessionExpired",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "SessionNotForThisRoom",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "TooEarly",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "WrongPhase",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "winCondition",
-        "type": "string"
-      }
-    ],
-    "name": "GameEnded",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "NightStarted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "voter",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "target",
-        "type": "address"
-      }
-    ],
-    "name": "VoteCast",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "eliminated",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "voteCount",
-        "type": "uint256"
-      }
-    ],
-    "name": "VotingFinalized",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "VotingStarted",
-    "type": "event"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "finalizeVoting",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "startVoting",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address",
-        "name": "target",
-        "type": "address"
-      }
-    ],
-    "name": "vote",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [],
-    "name": "ContractPaused",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "Reentrancy",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "WrongPhase",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "winCondition",
-        "type": "string"
-      }
-    ],
-    "name": "GameEnded",
-    "type": "event"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "uint256[2]",
-        "name": "a",
-        "type": "uint256[2]"
-      },
-      {
-        "internalType": "uint256[2][2]",
-        "name": "b",
-        "type": "uint256[2][2]"
-      },
-      {
-        "internalType": "uint256[2]",
-        "name": "c",
-        "type": "uint256[2]"
-      },
-      {
-        "internalType": "uint256[5]",
-        "name": "input",
-        "type": "uint256[5]"
-      }
-    ],
-    "name": "endGameZK",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
   {
     "inputs": [],
     "name": "AlreadyJoined",
@@ -2408,7 +1077,27 @@ export const DIAMOND_ABI = [
   },
   {
     "inputs": [],
-    "name": "ContractPaused",
+    "name": "AlreadyRevealed",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "AlreadySharedKeys",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "ArrayTooLarge",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidArrayLength",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidDeckSize",
     "type": "error"
   },
   {
@@ -2418,17 +1107,7 @@ export const DIAMOND_ABI = [
   },
   {
     "inputs": [],
-    "name": "InvalidSessionKey",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotMafiaMember",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotParticipant",
+    "name": "NotYourTurn",
     "type": "error"
   },
   {
@@ -2438,27 +1117,367 @@ export const DIAMOND_ABI = [
   },
   {
     "inputs": [],
-    "name": "PlayerInactive",
+    "name": "RoleAlreadyCommitted",
     "type": "error"
   },
   {
     "inputs": [],
-    "name": "Reentrancy",
+    "name": "RoleNotCommitted",
     "type": "error"
   },
   {
-    "inputs": [],
-    "name": "SessionExpired",
-    "type": "error"
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "AllKeysShared",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "AllRolesConfirmed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "commitHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "DeckCommitted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string[]",
+        "name": "deck",
+        "type": "string[]"
+      }
+    ],
+    "name": "DeckRevealed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "from",
+        "type": "address"
+      }
+    ],
+    "name": "KeysSharedToAll",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "bytes32",
+        "name": "commitHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "RoleCommitted",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      }
+    ],
+    "name": "RoleConfirmed",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "roleHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commitAndConfirmRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "deckHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commitDeck",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "roleHash",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commitRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "confirmRole",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256",
+        "name": "index",
+        "type": "uint256"
+      }
+    ],
+    "name": "getRevealedDeck",
+    "outputs": [
+      {
+        "internalType": "string",
+        "name": "",
+        "type": "string"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string[]",
+        "name": "deck",
+        "type": "string[]"
+      },
+      {
+        "internalType": "string",
+        "name": "salt",
+        "type": "string"
+      }
+    ],
+    "name": "revealDeck",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address[]",
+        "name": "recipients",
+        "type": "address[]"
+      },
+      {
+        "internalType": "bytes[]",
+        "name": "encryptedKeys",
+        "type": "bytes[]"
+      }
+    ],
+    "name": "shareKeysToAll",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
   },
   {
     "inputs": [],
-    "name": "SessionNotForThisRoom",
+    "name": "AlreadyVoted",
     "type": "error"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "voter",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      }
+    ],
+    "name": "VoteCast",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "finalizeVoting",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "startVoting",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "target",
+        "type": "address"
+      }
+    ],
+    "name": "vote",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
     "inputs": [],
-    "name": "WrongPhase",
+    "name": "NotMafiaMember",
     "type": "error"
   },
   {
@@ -2472,44 +1491,6 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "AllMafiaTargetsCommitted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "dayNumber",
-        "type": "uint256"
-      }
-    ],
-    "name": "DayStarted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "winCondition",
-        "type": "string"
-      }
-    ],
-    "name": "GameEnded",
     "type": "event"
   },
   {
@@ -2567,31 +1548,6 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "MafiaTargetRevealed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "killed",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "healed",
-        "type": "address"
-      }
-    ],
-    "name": "NightFinalized",
     "type": "event"
   },
   {
@@ -2701,6 +1657,524 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "revealMafiaTarget",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "a",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[2][2]",
+        "name": "b",
+        "type": "uint256[2][2]"
+      },
+      {
+        "internalType": "uint256[2]",
+        "name": "c",
+        "type": "uint256[2]"
+      },
+      {
+        "internalType": "uint256[5]",
+        "name": "input",
+        "type": "uint256[5]"
+      }
+    ],
+    "name": "endGameZK",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "AlreadyClaimed",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "winner",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint128",
+        "name": "amount",
+        "type": "uint128"
+      }
+    ],
+    "name": "PrizeDistributed",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "TournamentCancelled",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "organizer",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "buyIn",
+        "type": "uint256"
+      }
+    ],
+    "name": "TournamentCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      }
+    ],
+    "name": "TournamentJoined",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address[]",
+        "name": "players",
+        "type": "address[]"
+      }
+    ],
+    "name": "addToTournamentWhitelist",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "cancelTournament",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "internalType": "uint128",
+        "name": "buyIn",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint8",
+        "name": "maxPlayers",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "playersPerTable",
+        "type": "uint8"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "passwordHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "paymentToken",
+        "type": "address"
+      },
+      {
+        "internalType": "uint128",
+        "name": "initialPrize",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "sessionFee",
+        "type": "uint128"
+      }
+    ],
+    "name": "createTournament",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "internalType": "uint128",
+        "name": "buyIn",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint8",
+        "name": "maxPlayers",
+        "type": "uint8"
+      },
+      {
+        "internalType": "uint8",
+        "name": "playersPerTable",
+        "type": "uint8"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "tournamentPasswordHash",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "address",
+        "name": "paymentToken",
+        "type": "address"
+      },
+      {
+        "internalType": "uint128",
+        "name": "initialPrize",
+        "type": "uint128"
+      },
+      {
+        "internalType": "uint128",
+        "name": "sessionFee",
+        "type": "uint128"
+      },
+      {
+        "internalType": "string",
+        "name": "roomName",
+        "type": "string"
+      },
+      {
+        "internalType": "string",
+        "name": "nickname",
+        "type": "string"
+      },
+      {
+        "internalType": "bytes",
+        "name": "publicKey",
+        "type": "bytes"
+      },
+      {
+        "internalType": "address",
+        "name": "sessionAddress",
+        "type": "address"
+      },
+      {
+        "internalType": "bool",
+        "name": "isPrivate",
+        "type": "bool"
+      },
+      {
+        "internalType": "string",
+        "name": "joinPassword",
+        "type": "string"
+      }
+    ],
+    "name": "createTournamentAndRoom",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "distributeMafiaPrizes",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "getTournament",
+    "outputs": [
+      {
+        "components": [
+          {
+            "internalType": "uint256",
+            "name": "id",
+            "type": "uint256"
+          },
+          {
+            "internalType": "address",
+            "name": "organizer",
+            "type": "address"
+          },
+          {
+            "internalType": "string",
+            "name": "name",
+            "type": "string"
+          },
+          {
+            "internalType": "uint128",
+            "name": "buyIn",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "prizePool",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "sessionFee",
+            "type": "uint128"
+          },
+          {
+            "internalType": "uint128",
+            "name": "platformFeePool",
+            "type": "uint128"
+          },
+          {
+            "internalType": "address",
+            "name": "paymentToken",
+            "type": "address"
+          },
+          {
+            "internalType": "uint8",
+            "name": "maxPlayers",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
+            "name": "playersPerTable",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
+            "name": "currentRound",
+            "type": "uint8"
+          },
+          {
+            "internalType": "enum MafiaTypes.TournamentPhase",
+            "name": "phase",
+            "type": "uint8"
+          },
+          {
+            "internalType": "bytes32",
+            "name": "passwordHash",
+            "type": "bytes32"
+          },
+          {
+            "internalType": "bool",
+            "name": "prizesClaimed",
+            "type": "bool"
+          },
+          {
+            "internalType": "uint32",
+            "name": "registrationDeadline",
+            "type": "uint32"
+          },
+          {
+            "internalType": "address[]",
+            "name": "participants",
+            "type": "address[]"
+          }
+        ],
+        "internalType": "struct MafiaTypes.Tournament",
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      }
+    ],
+    "name": "isTournamentParticipant",
+    "outputs": [
+      {
+        "internalType": "bool",
+        "name": "",
+        "type": "bool"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "password",
+        "type": "string"
+      }
+    ],
+    "name": "joinTournament",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "tournamentPassword",
+        "type": "string"
+      },
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "string",
+        "name": "nickname",
+        "type": "string"
+      },
+      {
+        "internalType": "bytes",
+        "name": "publicKey",
+        "type": "bytes"
+      },
+      {
+        "internalType": "address",
+        "name": "sessionAddress",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes",
+        "name": "gmSignature",
+        "type": "bytes"
+      }
+    ],
+    "name": "joinTournamentAndRoom",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address[]",
+        "name": "players",
+        "type": "address[]"
+      }
+    ],
+    "name": "removeFromTournamentWhitelist",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "bool",
+        "name": "enabled",
+        "type": "bool"
+      }
+    ],
+    "name": "toggleTournamentWhitelist",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

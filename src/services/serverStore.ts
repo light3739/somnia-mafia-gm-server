@@ -77,14 +77,16 @@ export class ServerStore {
         roomId: string,
         actorAddress: string,
         nonce: string,
-        ttlSeconds: number = REPLAY_NONCE_TTL_SECONDS
+        ttlSeconds: number = REPLAY_NONCE_TTL_SECONDS,
+        chainId?: number | string
     ): Promise<boolean> {
         // Relax restriction for discussion to prevent 502/500 if Redis is missing
         const isDiscussion = scope.includes('discussion');
         this.ensureSecureStorageForCriticalPath(isDiscussion ? 'consumeReplayNonce:Discussion' : 'consumeReplayNonce');
 
         const normalizedRoomId = BigInt(roomId).toString();
-        const key = `replay:${scope}:${normalizedRoomId}:${actorAddress.toLowerCase()}:${nonce}`;
+        const cid = chainId || '43113';
+        const key = `replay:${scope}:${cid}:${normalizedRoomId}:${actorAddress.toLowerCase()}:${nonce}`;
 
         if (!redis) {
             const now = Date.now();
@@ -117,12 +119,13 @@ export class ServerStore {
      * Stores a player's role and salt in Redis.
      * Uses a Hash structure: room:secrets:{roomId} -> {address: secret}
      */
-    static async storeSecret(roomId: string, address: string, role: number, salt: string, commitment: string): Promise<StoreSecretResult> {
+    static async storeSecret(roomId: string, address: string, role: number, salt: string, commitment: string, chainId?: number | string): Promise<StoreSecretResult> {
         this.ensureSecureStorageForCriticalPath('storeSecret');
 
         const normalizedRoomId = BigInt(roomId).toString();
+        const cid = chainId || '43113';
         const secret: PlayerSecret = { role, salt, commitment };
-        const key = `room:secrets:${normalizedRoomId}`;
+        const key = `room:secrets:${cid}:${normalizedRoomId}`;
         const normalizedAddress = address.toLowerCase();
 
         if (!redis) {
@@ -170,11 +173,12 @@ export class ServerStore {
     /**
      * Retrieves all secrets for a specific room.
      */
-    static async getRoomSecrets(roomId: string): Promise<Record<string, PlayerSecret> | null> {
+    static async getRoomSecrets(roomId: string, chainId?: number | string): Promise<Record<string, PlayerSecret> | null> {
         this.ensureSecureStorageForCriticalPath('getRoomSecrets');
 
         const normalizedRoomId = BigInt(roomId).toString();
-        const key = `room:secrets:${normalizedRoomId}`;
+        const cid = chainId || '43113';
+        const key = `room:secrets:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
             const data = memoryStore[key];
@@ -206,9 +210,10 @@ export class ServerStore {
     /**
      * Manually clears room data (optional cleanup).
      */
-    static async clearRoom(roomId: string) {
+    static async clearRoom(roomId: string, chainId?: number | string) {
         const normalizedRoomId = BigInt(roomId).toString();
-        const key = `room:secrets:${normalizedRoomId}`;
+        const cid = chainId || '43113';
+        const key = `room:secrets:${cid}:${normalizedRoomId}`;
         if (!redis) {
             delete memoryStore[key];
             return;

@@ -19,6 +19,7 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
     sraSKeys: store.sraSKeys,
     resolvedRoles: store.resolvedRoles,
     investigationProofs: store.investigationProofs as unknown as Map<string, Map<string, any>>,
+    roomChains: store.roomChains,
     injectNight: injectNightState,
   });
 
@@ -28,11 +29,11 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
       const elapsed = Date.now() - nightState.nightStartedAt;
       const remaining = Math.max(5_000, NIGHT_TIMEOUT_MS - elapsed);
       const rid = BigInt(roomIdStr);
-      const savedChainId = nightChainIds.get(roomIdStr);
+      const cid = nightState.chainId;
       setTimeout(() => {
         const s = getNightState(rid);
         if (s && !s.resolved) {
-          doResolveNight(rid, store, redisClient, savedChainId).catch(() => {});
+          doResolveNight(rid, store, redisClient, cid).catch(() => {});
         }
       }, remaining);
     }
@@ -53,8 +54,12 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
         const val = await redisClient.get(key);
         if (val) {
           const data = JSON.parse(val);
-          const wallet = key.replace('gm:session:', '');
-          store.sessionCache.set(wallet, { sessionAddress: data.sessionAddress, roomId: data.roomId });
+          const walletWithChain = key.replace('gm:session:', ''); // format: 'chainId:wallet'
+          store.sessionCache.set(walletWithChain, {
+            sessionAddress: data.sessionAddress,
+            roomId: data.roomId,
+            chainId: data.chainId || 43113,
+          });
         }
       }
     }
@@ -63,14 +68,16 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
   // Role re-compute
   for (const [roomId, keyMap] of store.sraSKeys) {
     if (store.resolvedRoles.has(roomId)) continue;
+    const cid = store.roomChains.get(roomId);
+
     (async () => {
       try {
         const rid = BigInt(roomId);
-        const players = await getPlayers(rid) as any[];
+        const players = await getPlayers(rid, cid) as any[];
         const activeAddrs = players.filter(p => !!(Number(p.flags) & FLAGS.ACTIVE)).map(p => p.wallet.toLowerCase());
         if (!activeAddrs.every(a => keyMap.has(a))) return;
 
-        const { public: pc, diamond } = getChainConfig();
+        const { public: pc, diamond } = getChainConfig(cid);
         const deck = await pc.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [rid] }) as string[];
         const order = players.map(p => p.wallet.toLowerCase());
         store.roomPlayerOrder.set(roomId, order);

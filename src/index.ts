@@ -54,7 +54,7 @@ async function start(): Promise<void> {
     app.use(createRoomRoutes({ store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter }));
     app.use(createNightRoutes({ store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter, heavyLimiter }));
     app.use(createEciesRoutes({ store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter }));
-    app.use(createWinRoutes({ store, pollLimiter, heavyLimiter }));
+    app.use(createWinRoutes({ store, verifyAuthorizedSignature, pollLimiter, heavyLimiter }));
 
     const PORT = Number(process.env.PORT) || 3001;
     app.listen(PORT, '0.0.0.0', () => {

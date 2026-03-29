@@ -33,16 +33,17 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
   // ── Register Session Key ──────────────────────────────────
   router.post('/register-session', actionLimiter, async (req, res) => {
     try {
-      const { mainWallet, sessionAddress, roomId, signature, nonce, timestamp } = req.body;
-      if (!mainWallet || !sessionAddress || !roomId || !signature) {
+      const { mainWallet, sessionAddress, roomId, signature, nonce, timestamp, chainId } = req.body;
+      if (!mainWallet || !sessionAddress || !roomId || !signature || !chainId) {
         return res.status(400).json({ error: 'Missing req fields' });
       }
 
       const normalizedMain = mainWallet.toLowerCase();
       const normalizedSession = sessionAddress.toLowerCase();
       const roomNum = Number(roomId);
+      const cidNum = Number(chainId);
       const tsNum = Number(timestamp);
-      const message = `register-session:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}`;
+      const message = `register-session:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}:${cidNum}`;
 
       let recoveredAddress: string;
       try {
@@ -64,13 +65,14 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
       if (!valid) return res.status(401).json({ error: 'Invalid signature' });
 
       // Injected store usage
-      store.sessionCache.set(normalizedMain, { sessionAddress: normalizedSession, roomId: roomNum });
+      const cacheKey = `${cidNum}:${normalizedMain}`;
+      store.sessionCache.set(cacheKey, { sessionAddress: normalizedSession, roomId: roomNum, chainId: cidNum });
 
       // Injected redis usage
       if (redis) {
         redis.set(
-          `gm:session:${normalizedMain}`,
-          JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum }),
+          `gm:session:${cacheKey}`,
+          JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum, chainId: cidNum }),
           'EX',
           48 * 60 * 60,
         ).catch(() => {});

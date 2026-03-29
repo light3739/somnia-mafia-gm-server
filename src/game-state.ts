@@ -11,6 +11,7 @@ export interface NightAction {
 
 export interface RoomNightState {
   roomId: bigint;
+  chainId: number;
   actions: Map<string, NightAction>; // playerAddress → action (one per player)
   resolved: boolean;
   nightStartedAt: number;
@@ -21,12 +22,13 @@ export interface RoomNightState {
 /** Active night states per room */
 const nightStates = new Map<string, RoomNightState>(); // roomId string → state
 
-export function getOrCreateNightState(roomId: bigint): RoomNightState {
+export function getOrCreateNightState(roomId: bigint, chainId: number): RoomNightState {
   const key = roomId.toString();
   let state = nightStates.get(key);
   if (!state) {
     state = {
       roomId,
+      chainId,
       actions: new Map(),
       resolved: false,
       nightStartedAt: Date.now(),
