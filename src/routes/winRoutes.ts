@@ -45,7 +45,7 @@ export function createWinRoutes(ctx: WinRoutesContext) {
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress: String(playerAddress), signerAddress, nonce, timestamp, chainId,
         buildLegacyMessage: () => `submit-role-secret:${roomId}:${role}:${salt}:${commitment}`,
-        buildModernMessage: (n: string, ts: number) => `submit-role-secret:${roomId}:${role}:${salt}:${commitment}:${n}:${ts}`,
+        buildModernMessage: (n: string, ts: number) => `submit-role-secret:${chainId || 43113}:${roomId}:${role}:${salt}:${commitment}:${n}:${ts}`,
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 

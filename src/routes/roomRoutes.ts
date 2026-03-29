@@ -40,7 +40,7 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
         signature: String(signature) as `0x${string}`,
         signerAddress, nonce, timestamp, chainId,
         buildLegacyMessage: () => `setRoomPassword:${roomId}:${String(hostAddress).toLowerCase()}`,
-        buildModernMessage: (n: string, ts: number) => `setRoomPassword:${roomId}:${String(hostAddress).toLowerCase()}:${n}:${ts}`,
+        buildModernMessage: (n: string, ts: number) => `setRoomPassword:${chainId || 43113}:${roomId}:${String(hostAddress).toLowerCase()}:${n}:${ts}`,
       });
 
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });

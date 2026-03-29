@@ -121,7 +121,7 @@ export function createNightRoutes(ctx: NightRoutesContext) {
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress, signerAddress, nonce, timestamp, chainId,
         buildLegacyMessage: () => `night:${roomId}:${actionType}:${String(targetAddress).toLowerCase()}`,
-        buildModernMessage: (n: string, ts: number) => `night:${roomId}:${dayCount || 0}:${actionType}:${String(targetAddress).toLowerCase()}:${n}:${ts}`,
+        buildModernMessage: (n: string, ts: number) => `night:${chainId || 43113}:${roomId}:${dayCount || 0}:${actionType}:${String(targetAddress).toLowerCase()}:${n}:${ts}`,
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
@@ -185,7 +185,7 @@ export function createNightRoutes(ctx: NightRoutesContext) {
         playerAddress: String(mainWallet), signerAddress: effectiveSigner,
         nonce, timestamp, chainId,
         buildLegacyMessage: () => `resolve-night:${roomId}`,
-        buildModernMessage: (n: string, ts: number) => `resolve-night:${roomId}:${n}:${ts}`,
+        buildModernMessage: (n: string, ts: number) => `resolve-night:${chainId || 43113}:${roomId}:${n}:${ts}`,
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
