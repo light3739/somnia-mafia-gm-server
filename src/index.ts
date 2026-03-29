@@ -321,7 +321,14 @@ async function verifyAuthorizedSignature(params: {
           return { ok: true, signer: normalizedSigner };
         }
 
-        console.warn(`[AUTH] Session mismatch (attempt ${attempt + 1}), retrying...`, { normalizedPlayer, onChain: sessionAddress, expected: normalizedSigner });
+        console.warn(`[AUTH] Session mismatch (attempt ${attempt + 1}), retrying...`, { 
+            player: normalizedPlayer, 
+            onChain: sessionAddress, 
+            received: normalizedSigner,
+            room: expectedRoomId,
+            onChainRoom: sessionRoomId,
+            active: isActive
+        });
         if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
       } catch (e: any) {
         console.warn(`[AUTH] Session lookup failed (attempt ${attempt + 1}), retrying...`, e.message);
@@ -329,7 +336,7 @@ async function verifyAuthorizedSignature(params: {
       }
     }
 
-    return { ok: false, error: `Session key mismatch/stale on-chain. Expected: ${normalizedSigner}`, status: 403 };
+    return { ok: false, error: `Session key mismatch/stale on-chain. Received: ${normalizedSigner}. Please re-join the lobby to sync with the expected key on-chain.`, status: 403 };
   }
 
   return { ok: true, signer: normalizedSigner };
@@ -1279,6 +1286,8 @@ app.post('/submit-sra-key', actionLimiter, async (req: express.Request, res: exp
     }
 
     if (!phaseMatch) {
+      const { diamond } = getChainConfig(chainId ? Number(chainId) : undefined);
+      console.warn(`[submit-sra-key] Phase check failed for room ${roomId} on chain ${chainId || 'default'}. Diamond: ${diamond}, Current Phase on-chain: ${lastPhase}. Expected REVEAL(2) or ENDED(6).`);
       return res.status(400).json({ error: `Cannot submit SRA key outside REVEAL phase (current: ${lastPhase})` });
     }
 
