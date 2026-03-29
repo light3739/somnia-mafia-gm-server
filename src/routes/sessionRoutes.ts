@@ -43,7 +43,7 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
       const roomNum = Number(roomId);
       const cidNum = Number(chainId);
       const tsNum = Number(timestamp);
-      const message = `register-session:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}:${cidNum}`;
+      const message = `register-session:${cidNum}:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}`;
 
       let recoveredAddress: string;
       try {

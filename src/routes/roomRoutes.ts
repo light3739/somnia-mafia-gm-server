@@ -39,7 +39,7 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
         playerAddress: String(hostAddress),
         signature: String(signature) as `0x${string}`,
         signerAddress, nonce, timestamp, chainId,
-        buildLegacyMessage: () => `setRoomPassword:${roomId}:${String(hostAddress).toLowerCase()}`,
+        buildLegacyMessage: () => `setRoomPassword:${chainId || 43113}:${roomId}:${String(hostAddress).toLowerCase()}`,
         buildModernMessage: (n: string, ts: number) => `setRoomPassword:${chainId || 43113}:${roomId}:${String(hostAddress).toLowerCase()}:${n}:${ts}`,
       });
 
