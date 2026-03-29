@@ -139,6 +139,13 @@ export const DIAMOND_ABI = [
     ],
   },
   {
+    type: 'function',
+    name: 'getDeck',
+    inputs: [{ name: 'roomId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'string[]', internalType: 'string[]' }],
+    stateMutability: 'view',
+  },
+  {
     stateMutability: 'view',
   },
   {
