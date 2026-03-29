@@ -287,31 +287,29 @@ async function verifyAuthorizedSignature(params: {
       return { ok: true, signer: normalizedSigner };
     }
 
-    // 2) Fallback: check on-chain (single attempt, no retries)
-    try {
-      const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
-      const sessionAddress = String(session.sessionAddress || '').toLowerCase();
-      const isActive = Boolean(session.isActive);
-      const sessionRoomId = Number(session.roomId || 0);
+    // 2) Fallback: check on-chain (with retry for RPC lag)
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const session = await getSessionKey(normalizedPlayer as Address, chainId) as any;
+        const sessionAddress = String(session.sessionAddress || '').toLowerCase();
+        const isActive = Boolean(session.isActive);
+        const sessionRoomId = Number(session.roomId || 0);
 
-      if (sessionAddress === normalizedSigner && isActive && sessionRoomId === expectedRoomId) {
-        // Populate cache for future calls
-        sessionCache.set(normalizedPlayer, { sessionAddress: normalizedSigner, roomId: expectedRoomId });
-        return { ok: true, signer: normalizedSigner };
+        if (sessionAddress === normalizedSigner && isActive && sessionRoomId === expectedRoomId) {
+          // Populate cache for future calls
+          sessionCache.set(normalizedPlayer, { sessionAddress: normalizedSigner, roomId: expectedRoomId });
+          return { ok: true, signer: normalizedSigner };
+        }
+
+        console.warn(`[AUTH] Session mismatch (attempt ${attempt + 1}), retrying...`, { normalizedPlayer, onChain: sessionAddress, expected: normalizedSigner });
+        if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
+      } catch (e: any) {
+        console.warn(`[AUTH] Session lookup failed (attempt ${attempt + 1}), retrying...`, e.message);
+        if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
       }
-
-      console.error('[AUTH FAIL] Session mismatch', {
-        normalizedSigner,
-        normalizedPlayer,
-        onChainSession: sessionAddress,
-        cachedSession: cached?.sessionAddress || 'none',
-        roomId
-      });
-      return { ok: false, error: `Session key not registered (on-chain: ${sessionAddress}, expected: ${normalizedSigner})`, status: 403 };
-    } catch (e: any) {
-      console.error('[AUTH FAIL] On-chain session check failed', { normalizedSigner, normalizedPlayer, error: e?.message });
-      return { ok: false, error: `Session verification failed: ${e?.message}`, status: 403 };
     }
+
+    return { ok: false, error: `Session key mismatch/stale on-chain. Expected: ${normalizedSigner}`, status: 403 };
   }
 
   return { ok: true, signer: normalizedSigner };
