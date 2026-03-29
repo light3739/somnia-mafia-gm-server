@@ -25,13 +25,18 @@ export class GMStore {
   // mainWallet.lower() → { sessionAddress, roomId, chainId }
   public sessionCache = new Map<string, { sessionAddress: string; roomId: number; chainId: number }>();
 
-  // roomId string → chainId number
+  // roomId string (or composite "chainId:roomId") → chainId number
   public roomChains = new Map<string, number>();
 
+  /** Helper to get composite key for multi-chain support. */
+  public getRoomKey(chainId: number, roomId: string | number | bigint): string {
+    return `${chainId}:${roomId}`;
+  }
+
   /** Helper to get or create a nested room map. */
-  public getRoomMap<V>(map: Map<string, Map<string, V>>, roomId: string): Map<string, V> {
-    let m = map.get(roomId);
-    if (!m) { m = new Map(); map.set(roomId, m); }
+  public getRoomMap<V>(map: Map<string, Map<string, V>>, roomKey: string): Map<string, V> {
+    let m = map.get(roomKey);
+    if (!m) { m = new Map(); map.set(roomKey, m); }
     return m;
   }
 }

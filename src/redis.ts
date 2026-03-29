@@ -40,12 +40,15 @@ export async function connectRedis(): Promise<void> {
 
 // ─── Key builders ─────────────────────────────────────────
 const K = {
-  pubkey: (r: string, a: string) => `gm:room:${r}:pubkey:${a}`,
-  srakey: (r: string, a: string) => `gm:room:${r}:srakey:${a}`,
-  role:   (r: string, a: string) => `gm:room:${r}:role:${a}`,
-  proof:  (r: string, a: string) => `gm:room:${r}:proof:${a}`,
-  night:  (r: string)             => `gm:room:${r}:night`,
-  chain:  (r: string)             => `gm:room:${r}:chain`,
+  pubkey: (c: number, r: string, a: string) => `gm:room:${c}:${r}:pubkey:${a}`,
+  srakey: (c: number, r: string, a: string) => `gm:room:${c}:${r}:srakey:${a}`,
+  role:   (c: number, r: string, a: string) => `gm:room:${c}:${r}:role:${a}`,
+  proof:  (c: number, r: string, a: string) => `gm:room:${c}:${r}:proof:${a}`,
+  night:  (c: number, r: string)             => `gm:room:${c}:${r}:night`,
+  // chain key is still needed for reverse lookup or simplicity? 
+  // Actually, once it's in the key, we don't need a separate :chain key per room, 
+  // but let's keep it if we need to know the block explorer or similar.
+  chain:  (c: number, r: string)             => `gm:room:${c}:${r}:chain`,
 };
 
 // ─── Fire-and-forget write helper ────────────────────────
@@ -56,20 +59,20 @@ function fw(redis: RedisClient, fn: (r: Redis) => Promise<unknown>): void {
 
 // ─── Per-entry write helpers ─────────────────────────────
 
-export function rPersistPubkey(redis: RedisClient, roomId: string, addr: string, pubkey: string): void {
-  fw(redis, r => r.set(K.pubkey(roomId, addr), pubkey, 'EX', TTL));
+export function rPersistPubkey(redis: RedisClient, chainId: number, roomId: string, addr: string, pubkey: string): void {
+  fw(redis, r => r.set(K.pubkey(chainId, roomId, addr), pubkey, 'EX', TTL));
 }
 
-export function rPersistSraKey(redis: RedisClient, roomId: string, addr: string, key: string): void {
-  fw(redis, r => r.set(K.srakey(roomId, addr), key, 'EX', TTL));
+export function rPersistSraKey(redis: RedisClient, chainId: number, roomId: string, addr: string, key: string): void {
+  fw(redis, r => r.set(K.srakey(chainId, roomId, addr), key, 'EX', TTL));
 }
 
-export function rPersistRole(redis: RedisClient, roomId: string, addr: string, role: Role): void {
-  fw(redis, r => r.set(K.role(roomId, addr), String(role), 'EX', TTL));
+export function rPersistRole(redis: RedisClient, chainId: number, roomId: string, addr: string, role: Role): void {
+  fw(redis, r => r.set(K.role(chainId, roomId, addr), String(role), 'EX', TTL));
 }
 
-export function rPersistRoomChain(redis: RedisClient, roomId: string, chainId: number): void {
-  fw(redis, r => r.set(K.chain(roomId), String(chainId), 'EX', TTL));
+export function rPersistRoomChain(redis: RedisClient, chainId: number, roomId: string): void {
+  fw(redis, r => r.set(K.chain(chainId, roomId), String(chainId), 'EX', TTL));
 }
 
 export interface PersistedProof {
@@ -79,14 +82,15 @@ export interface PersistedProof {
 
 export function rPersistProof(
   redis: RedisClient,
+  chainId: number,
   roomId: string,
   detective: string,
   proof: PersistedProof,
 ): void {
-  fw(redis, r => r.set(K.proof(roomId, detective), JSON.stringify(proof), 'EX', TTL));
+  fw(redis, r => r.set(K.proof(chainId, roomId, detective), JSON.stringify(proof), 'EX', TTL));
 }
 
-export function rPersistNightState(redis: RedisClient, roomId: string, state: RoomNightState): void {
+export function rPersistNightState(redis: RedisClient, chainId: number, roomId: string, state: RoomNightState): void {
   const payload = JSON.stringify({
     roomId,
     chainId: state.chainId,
@@ -94,11 +98,11 @@ export function rPersistNightState(redis: RedisClient, roomId: string, state: Ro
     nightStartedAt: state.nightStartedAt,
     actions: [...state.actions.entries()],
   });
-  fw(redis, r => r.set(K.night(roomId), payload, 'EX', TTL));
+  fw(redis, r => r.set(K.night(chainId, roomId), payload, 'EX', TTL));
 }
 
-export function rDeleteNightState(redis: RedisClient, roomId: string): void {
-  fw(redis, r => r.del(K.night(roomId)));
+export function rDeleteNightState(redis: RedisClient, chainId: number, roomId: string): void {
+  fw(redis, r => r.del(K.night(chainId, roomId)));
 }
 
 // ─── Startup: restore all state from Redis ────────────────
@@ -142,32 +146,36 @@ export async function loadAllState(redis: Redis, containers: StateContainers): P
     if (!val) continue;
 
     const parts = key.split(':');
-    if (parts.length < 4) continue;
+    if (parts.length < 5) continue; // gm:room:chainId:roomId:type
 
-    const roomId = parts[2];
-    const type   = parts[3];
-    const addr   = parts[4];
+    const chainId = Number(parts[2]);
+    const roomId  = parts[3];
+    const type    = parts[4];
+    const addr    = parts[5];
+
+    // Build the composite key used in memory: "chainId:roomId"
+    const roomKey = `${chainId}:${roomId}`;
 
     switch (type) {
       case 'pubkey':
-        if (addr) getOrCreateInner(containers.eciesPubkeys, roomId).set(addr, val);
+        if (addr) getOrCreateInner(containers.eciesPubkeys, roomKey).set(addr, val);
         break;
       case 'srakey':
-        if (addr) getOrCreateInner(containers.sraSKeys, roomId).set(addr, val);
+        if (addr) getOrCreateInner(containers.sraSKeys, roomKey).set(addr, val);
         break;
       case 'role':
-        if (addr) getOrCreateInner(containers.resolvedRoles, roomId).set(addr, Number(val) as Role);
+        if (addr) getOrCreateInner(containers.resolvedRoles, roomKey).set(addr, Number(val) as Role);
         break;
       case 'proof': {
         if (!addr) break;
-        getOrCreateInner(containers.investigationProofs, roomId).set(addr, JSON.parse(val));
+        getOrCreateInner(containers.investigationProofs, roomKey).set(addr, JSON.parse(val));
         break;
       }
       case 'night': {
         const ns = JSON.parse(val);
         containers.injectNight(BigInt(ns.roomId), {
           roomId: BigInt(ns.roomId),
-          chainId: ns.chainId || 43113, 
+          chainId: ns.chainId || chainId, 
           resolved: ns.resolved,
           nightStartedAt: ns.nightStartedAt,
           actions: new Map(ns.actions as [string, NightAction][]),
@@ -175,7 +183,7 @@ export async function loadAllState(redis: Redis, containers: StateContainers): P
         break;
       }
       case 'chain': {
-        containers.roomChains.set(roomId, Number(val));
+        containers.roomChains.set(roomKey, Number(val));
         break;
       }
     }

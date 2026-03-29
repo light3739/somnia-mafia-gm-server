@@ -20,27 +20,28 @@ const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 180_000);
 const nightTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export const nightChainIds = new Map<string, number | undefined>();
 
-function clearNightTimer(roomIdStr: string): void {
-  const t = nightTimers.get(roomIdStr);
-  if (t) { clearTimeout(t); nightTimers.delete(roomIdStr); }
+function clearNightTimer(roomKey: string): void {
+  const t = nightTimers.get(roomKey);
+  if (t) { clearTimeout(t); nightTimers.delete(roomKey); }
 }
 
 export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): Promise<void> {
   const state = getNightState(rid);
   if (!state || state.resolved) return;
-  const effectiveChainId = chainId || state.chainId;
+  const effectiveChainId = Number(chainId || state.chainId);
   if (state.actions.size === 0) return;
 
   state.resolved = true;
+  const roomKey = store.getRoomKey(effectiveChainId, String(rid));
   const { rPersistNightState, rDeleteNightState } = await import('../redis.js');
-  if (redis) rPersistNightState(redis, String(rid), state);
+  if (redis) rPersistNightState(redis, effectiveChainId, String(rid), state);
 
   const allActions = [...state.actions.values()];
 
   let totalAliveMafia: number | undefined;
   try {
-    const players = await getPlayers(rid, effectiveChainId as any);
-    const roomRoles = store.resolvedRoles.get(String(rid));
+    const players = await getPlayers(rid, effectiveChainId);
+    const roomRoles = store.resolvedRoles.get(roomKey);
     if (roomRoles) {
       totalAliveMafia = players.filter((p) =>
         !!(Number(p.flags) & FLAGS.ACTIVE) &&
@@ -53,32 +54,32 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
   const healTarget = getDoctorHeal(allActions);
 
   try {
-    await resolveNight(rid, killTarget, healTarget, effectiveChainId as any);
+    await resolveNight(rid, killTarget, healTarget, effectiveChainId);
   } catch (err: any) {
     if (getNightState(rid)) {
       getNightState(rid)!.resolved = false;
-      if (redis) rPersistNightState(redis, String(rid), getNightState(rid)!);
+      if (redis) rPersistNightState(redis, effectiveChainId, String(rid), getNightState(rid)!);
     }
     throw err;
   } finally {
-    clearNightTimer(String(rid));
-    nightChainIds.delete(String(rid));
+    clearNightTimer(roomKey);
+    nightChainIds.delete(roomKey);
   }
   clearNightState(rid);
-  if (redis) rDeleteNightState(redis, String(rid));
+  if (redis) rDeleteNightState(redis, effectiveChainId, String(rid));
 }
 
 export function scheduleNightTimeout(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): void {
-  const key = String(rid);
-  clearNightTimer(key);
-  nightChainIds.set(key, chainId as any);
+  const roomKey = store.getRoomKey(Number(chainId || 43113), String(rid));
+  clearNightTimer(roomKey);
+  nightChainIds.set(roomKey, Number(chainId));
   const t = setTimeout(async () => {
-    nightTimers.delete(key);
+    nightTimers.delete(roomKey);
     const s = getNightState(rid);
     if (!s || s.resolved) return;
-    doResolveNight(rid, store, redis, chainId as any).catch(() => {});
+    doResolveNight(rid, store, redis, chainId).catch(() => {});
   }, NIGHT_TIMEOUT_MS);
-  nightTimers.set(key, t);
+  nightTimers.set(roomKey, t);
 }
 
 export interface NightRoutesContext {
@@ -94,8 +95,9 @@ export function createNightRoutes(ctx: NightRoutesContext) {
   const router = Router();
   const { store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter, heavyLimiter } = ctx;
 
-  const allRolePlayersActed = (roomIdStr: string, alivePlayers: ReturnType<typeof Array.prototype.filter>) => {
-    const roles = store.resolvedRoles.get(roomIdStr);
+  const allRolePlayersActed = (chainId: number, roomIdStr: string, alivePlayers: ReturnType<typeof Array.prototype.filter>) => {
+    const roomKey = store.getRoomKey(chainId, roomIdStr);
+    const roles = store.resolvedRoles.get(roomKey);
     if (!roles) return false;
     const roleActors = alivePlayers.filter((p) => {
       const r = roles.get(p.wallet.toLowerCase());
@@ -136,7 +138,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       const committed = await hasCommittedRole(rid, playerAddress as Address, chainId);
       if (!committed) return res.status(403).json({ error: 'No on-chain role' });
 
-      const roomRoles = store.resolvedRoles.get(String(roomId));
+      const roomKey = store.getRoomKey(Number(chainId), String(roomId));
+      const roomRoles = store.resolvedRoles.get(roomKey);
       const playerRole = roomRoles?.get(String(playerAddress).toLowerCase());
       if (playerRole !== undefined) {
         const required: Record<string, Role> = { kill: Role.MAFIA, heal: Role.DOCTOR, check: Role.DETECTIVE };
@@ -153,16 +156,16 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       });
       
       const { rPersistNightState } = await import('../redis.js');
-      if (redis) rPersistNightState(redis, String(roomId), state);
+      if (redis) rPersistNightState(redis, Number(chainId), String(roomId), state);
 
       if (actionType === 'check') {
-        store.getRoomMap(store.investigationProofs, String(roomId)).set(String(playerAddress).toLowerCase(), {
+        store.getRoomMap(store.investigationProofs, roomKey).set(String(playerAddress).toLowerCase(), {
           targetAddress: targetAddress as Address, timestamp: Date.now(),
         });
       }
 
       const alivePlayers = players.filter((p: any) => !!(Number(p.flags) & FLAGS.ACTIVE));
-      if (allRolePlayersActed(String(roomId), alivePlayers)) {
+      if (allRolePlayersActed(Number(chainId), String(roomId), alivePlayers)) {
         doResolveNight(rid, store, redis, chainId).catch(() => {});
       } else if (state.actions.size === 1) {
         scheduleNightTimeout(rid, store, redis, chainId);

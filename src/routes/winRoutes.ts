@@ -66,8 +66,10 @@ export function createWinRoutes(ctx: WinRoutesContext) {
     try {
       const rid = BigInt(req.params.roomId);
       const cid = req.query.chainId ? Number(req.query.chainId) : undefined;
-      const [room, players] = await Promise.all([getRoom(rid, cid), getPlayers(rid, cid)]);
-      const roles = store.resolvedRoles.get(String(req.params.roomId));
+      const effectiveCid = cid || 43113;
+      const roomKey = store.getRoomKey(effectiveCid, req.params.roomId);
+      const [room, players] = await Promise.all([getRoom(rid, effectiveCid), getPlayers(rid, effectiveCid)]);
+      const roles = store.resolvedRoles.get(roomKey);
       if (!roles) return res.json({ winDetected: false });
 
       let mafiaCount = 0, townCount = 0;

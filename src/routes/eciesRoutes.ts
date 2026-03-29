@@ -41,11 +41,12 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       return res.status(400).json({ error: 'Unauthorized phase for pubkey' });
     }
 
-    store.getRoomMap(store.eciesPubkeys, String(roomId)).set(normalizedAddr, pubkey);
+    const roomKey = store.getRoomKey(Number(chainId), String(roomId));
+    store.getRoomMap(store.eciesPubkeys, roomKey).set(normalizedAddr, pubkey);
     const { rPersistPubkey, rPersistRoomChain } = await import('../redis.js');
     if (redis) {
-      rPersistPubkey(redis, String(roomId), normalizedAddr, pubkey);
-      rPersistRoomChain(redis, String(roomId), Number(chainId));
+      rPersistPubkey(redis, Number(chainId), String(roomId), normalizedAddr, pubkey);
+      rPersistRoomChain(redis, Number(chainId), String(roomId));
     }
     
     return res.json({ ok: true });
@@ -62,13 +63,14 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       });
       if (!sigCheck.ok) return res.status(sigCheck.status || 401).json({ error: sigCheck.error });
 
-      const roomSraKeys = store.getRoomMap(store.sraSKeys, String(roomId));
+      const roomKey = store.getRoomKey(Number(chainId), String(roomId));
+      const roomSraKeys = store.getRoomMap(store.sraSKeys, roomKey);
       const normalizedPlayer = String(playerAddress).toLowerCase();
       roomSraKeys.set(normalizedPlayer, String(sraKey));
       const { rPersistSraKey, rPersistRole, rPersistRoomChain } = await import('../redis.js');
       if (redis) {
-        rPersistSraKey(redis, String(roomId), normalizedPlayer, String(sraKey));
-        rPersistRoomChain(redis, String(roomId), Number(chainId));
+        rPersistSraKey(redis, Number(chainId), String(roomId), normalizedPlayer, String(sraKey));
+        rPersistRoomChain(redis, Number(chainId), String(roomId));
       }
 
       // Try pre-cache
@@ -78,15 +80,15 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       if (activeAddrs.every(addr => roomSraKeys.has(addr))) {
         const { public: publicClient, diamond } = getChainConfig(chainId);
         const deck = await publicClient.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [BigInt(roomId)] }) as string[];
-        const order = (store.roomPlayerOrder.get(String(roomId)) || players.map(p => p.wallet.toLowerCase())) as `0x${string}`[];
-        store.roomPlayerOrder.set(String(roomId), order);
+        const order = (store.roomPlayerOrder.get(roomKey) || players.map(p => p.wallet.toLowerCase())) as `0x${string}`[];
+        store.roomPlayerOrder.set(roomKey, order);
         const allKeys = players.map(p => roomSraKeys.get(p.wallet.toLowerCase())).filter(Boolean) as string[];
-        const roomRoles = store.getRoomMap(store.resolvedRoles, String(roomId));
+        const roomRoles = store.getRoomMap(store.resolvedRoles, roomKey);
         order.forEach((addr, i) => {
           if (i < deck.length) {
             const role = roleFromCardValue(sraDecryptCard(deck[i], allKeys), Number(roomId));
             roomRoles.set(addr, role);
-            if (redis) rPersistRole(redis, String(roomId), addr, role);
+            if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr, role);
           }
         });
       }
@@ -107,10 +109,11 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
-      const pubkey = store.eciesPubkeys.get(String(roomId))?.get(String(playerAddress).toLowerCase());
+      const roomKey = store.getRoomKey(Number(chainId), roomId);
+      const pubkey = store.eciesPubkeys.get(roomKey)?.get(String(playerAddress).toLowerCase());
       if (!pubkey) return res.status(404).json({ error: 'ECIES pubkey missing' });
 
-      let role = store.resolvedRoles.get(String(roomId))?.get(String(playerAddress).toLowerCase());
+      let role = store.resolvedRoles.get(roomKey)?.get(String(playerAddress).toLowerCase());
       if (!role) {
         // Full logic for manual decrypt if role not pre-cached...
         // For simplicity in this demo, we assume pre-cache is working or 202 retry.
@@ -126,7 +129,9 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
 
   router.get('/room-roles/:roomId', pollLimiter, async (req, res) => {
     // Implement game-ended check + role returning logic...
-    const cached = store.resolvedRoles.get(String(req.params.roomId));
+    const { chainId } = req.query as Record<string, string>;
+    const roomKey = store.getRoomKey(Number(chainId), req.params.roomId);
+    const cached = store.resolvedRoles.get(roomKey);
     if (!cached) return res.status(202).json({ pending: true });
     const result: Record<string, number> = {};
     for (const [addr, role] of cached) result[addr.toLowerCase()] = role as number;
