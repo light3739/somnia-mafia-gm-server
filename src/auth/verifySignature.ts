@@ -56,11 +56,21 @@ export function createAuthService(ctx: AuthContext) {
           return { ok: false, error: 'Nonce already used (potential replay)', status: 401 };
         }
 
+        const legacy = buildLegacyMessage();
+        const modern = buildModernMessage(nonce, tsNum);
+
         valid = await verifyMessage({
           address: normalizedSigner as Address,
-          message: buildModernMessage(nonce, tsNum),
+          message: modern,
           signature,
         });
+
+        if (!valid) {
+          console.log(`[AUTH-DEBUG] Modern Sig Fail. Signer: ${normalizedSigner}`);
+          console.log(`[AUTH-DEBUG] Modern Message: "${modern}"`);
+          console.log(`[AUTH-DEBUG] Legacy Message: "${legacy}"`);
+          console.log(`[AUTH-DEBUG] Signature (prefix): ${signature?.slice(0, 10)}...`);
+        }
       }
     }
 

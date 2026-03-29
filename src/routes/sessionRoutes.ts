@@ -41,9 +41,9 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
       const normalizedMain = mainWallet.toLowerCase();
       const normalizedSession = sessionAddress.toLowerCase();
       const roomNum = Number(roomId);
-      const cidNum = Number(chainId);
       const tsNum = Number(timestamp);
-      const message = `register-session:${cidNum}:${roomId}:${normalizedMain}:${normalizedSession}:${nonce}:${tsNum}`;
+      const cidStr = String(chainId || 43113);
+      const message = `register-session:${cidStr}:${String(roomId)}:${normalizedMain}:${normalizedSession}:${nonce}:${String(tsNum)}`;
 
       let recoveredAddress: string;
       try {
@@ -62,17 +62,21 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
         message,
         signature: signature as `0x${string}`,
       });
-      if (!valid) return res.status(401).json({ error: 'Invalid signature' });
+      if (!valid) {
+        console.log(`[SESSION-DEBUG] Sig Fail. Address: ${recoveredAddress}`);
+        console.log(`[SESSION-DEBUG] Message: "${message}"`);
+        return res.status(401).json({ error: 'Invalid signature' });
+      }
 
       // Injected store usage
-      const cacheKey = `${cidNum}:${normalizedMain}`;
-      store.sessionCache.set(cacheKey, { sessionAddress: normalizedSession, roomId: roomNum, chainId: cidNum });
+      const cacheKey = `${cidStr}:${normalizedMain}`;
+      store.sessionCache.set(cacheKey, { sessionAddress: normalizedSession, roomId: roomNum, chainId: Number(cidStr) });
 
       // Injected redis usage
       if (redis) {
         redis.set(
           `gm:session:${cacheKey}`,
-          JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum, chainId: cidNum }),
+          JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum, chainId: Number(cidStr) }),
           'EX',
           48 * 60 * 60,
         ).catch(() => {});

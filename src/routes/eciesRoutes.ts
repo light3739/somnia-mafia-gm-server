@@ -30,8 +30,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     const sigCheck = await verifyAuthorizedSignature({
       roomId: String(roomId), signature: signature as `0x${string}`,
       playerAddress: normalizedAddr, signerAddress, nonce, timestamp, chainId,
-      buildLegacyMessage: () => `register-pubkey:${chainId || 43113}:${roomId}:${normalizedAddr}:${pubkey}`,
-      buildModernMessage: (n: string, ts: number) => `register-pubkey:${chainId || 43113}:${roomId}:${normalizedAddr}:${pubkey}:${n}:${ts}`,
+      buildLegacyMessage: () => `register-pubkey:${String(chainId || 43113)}:${String(roomId)}:${normalizedAddr}:${pubkey}`,
+      buildModernMessage: (n: string, ts: number) => `register-pubkey:${String(chainId || 43113)}:${String(roomId)}:${normalizedAddr}:${pubkey}:${n}:${ts}`,
     });
     if (!sigCheck.ok) return res.status(sigCheck.status || 401).json({ error: sigCheck.error });
 
@@ -58,8 +58,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       const sigCheck = await verifyAuthorizedSignature({
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress: String(playerAddress), signerAddress, nonce, timestamp, chainId,
-        buildLegacyMessage: () => `submit-key:${chainId || 43113}:${roomId}:${sraKey}`,
-        buildModernMessage: (n: string, ts: number) => `submit-key:${chainId || 43113}:${roomId}:${sraKey}:${n}:${ts}`,
+        buildLegacyMessage: () => `submit-key:${String(chainId || 43113)}:${String(roomId)}:${sraKey}`,
+        buildModernMessage: (n: string, ts: number) => `submit-key:${String(chainId || 43113)}:${String(roomId)}:${sraKey}:${n}:${ts}`,
       });
       if (!sigCheck.ok) return res.status(sigCheck.status || 401).json({ error: sigCheck.error });
 
@@ -104,8 +104,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       const { playerAddress, signature, signerAddress, nonce, timestamp, chainId } = req.query as Record<string, string>;
       const sigCheck = await verifyAuthorizedSignature({
         roomId, signature: signature as `0x${string}`, playerAddress, signerAddress, nonce, timestamp: Number(timestamp), chainId,
-        buildLegacyMessage: () => `my-role:${chainId || 43113}:${roomId}:${playerAddress.toLowerCase()}`,
-        buildModernMessage: (n: string, ts: number) => `my-role:${chainId || 43113}:${roomId}:${playerAddress.toLowerCase()}:${n}:${ts}`,
+        buildLegacyMessage: () => `my-role:${String(chainId || 43113)}:${String(roomId)}:${playerAddress.toLowerCase()}`,
+        buildModernMessage: (n: string, ts: number) => `my-role:${String(chainId || 43113)}:${String(roomId)}:${playerAddress.toLowerCase()}:${n}:${ts}`,
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
