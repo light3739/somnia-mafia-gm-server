@@ -68,26 +68,29 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
   // Role re-compute
   for (const [roomId, keyMap] of store.sraSKeys) {
     if (store.resolvedRoles.has(roomId)) continue;
-    const cid = store.roomChains.get(roomId);
 
     (async () => {
       try {
-        const rid = BigInt(roomId);
-        const players = await getPlayers(rid, cid) as any[];
+        const [cidStr, ridInKeyStr] = roomId.split(':');
+        const cidNum = Number(cidStr || 43113);
+        const rid = BigInt(ridInKeyStr);
+
+        const players = await getPlayers(rid, cidNum) as any[];
         const activeAddrs = players.filter(p => !!(Number(p.flags) & FLAGS.ACTIVE)).map(p => p.wallet.toLowerCase());
         if (!activeAddrs.every(a => keyMap.has(a))) return;
 
-        const { public: pc, diamond } = getChainConfig(cid);
-        const deck = await pc.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [rid] }) as string[];
+        const { public: pc, diamond } = getChainConfig(cidNum);
+        const ridInKey = ridInKeyStr;
+        const deck = await pc.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [BigInt(ridInKey)] }) as string[];
         const order = players.map(p => p.wallet.toLowerCase());
         store.roomPlayerOrder.set(roomId, order);
         const allKeys = players.map(p => keyMap.get(p.wallet.toLowerCase())).filter(Boolean) as string[];
         const roomRoles = store.getRoomMap(store.resolvedRoles, roomId);
         order.forEach((addr, i) => {
           if (i < deck.length) {
-            const r = roleFromCardValue(sraDecryptCard(deck[i], allKeys), Number(roomId));
+            const r = roleFromCardValue(sraDecryptCard(deck[i], allKeys), Number(ridInKey));
             roomRoles.set(addr, r);
-            rPersistRole(redisClient, roomId, addr, r);
+            rPersistRole(redisClient, cidNum, ridInKey, addr, r);
           }
         });
       } catch { /* ... */ }
