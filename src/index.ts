@@ -1041,7 +1041,8 @@ app.post('/resolve-night', heavyLimiter, async (req: express.Request, res: expre
     const callerMainWallet = mainWallet.toLowerCase();
     const isHost = callerMainWallet === resolveHost || signatureCheck.signer === resolveHost;
     const isGM = callerMainWallet === GM_ADDRESS.toLowerCase() || signatureCheck.signer === GM_ADDRESS.toLowerCase();
-    const deadlineExpired = resolveDeadline > 0 && nowSec > resolveDeadline;
+    // Use a 30s grace period for clock skew (client triggers at +5s, so GM clock can be up to 25s behind)
+    const deadlineExpired = resolveDeadline > 0 && (nowSec + 30) > resolveDeadline;
     if (!isHost && !isGM) {
       if (!deadlineExpired) {
         return res.status(403).json({ error: 'Only the room host or GM can trigger resolve-night before deadline' });
