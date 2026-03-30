@@ -122,8 +122,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       const sigCheck = await verifyAuthorizedSignature({
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress, signerAddress, nonce, timestamp, chainId,
-        buildLegacyMessage: () => `night:${chainId || 43113}:${roomId}:${actionType}:${String(targetAddress).toLowerCase()}`,
-        buildModernMessage: (n: string, ts: number) => `night:${chainId || 43113}:${roomId}:${dayCount || 0}:${actionType}:${String(targetAddress).toLowerCase()}:${n}:${ts}`,
+        buildLegacyMessage: () => `night:${String(chainId || 43113)}:${String(roomId)}:${actionType}:${String(targetAddress).toLowerCase()}`,
+        buildModernMessage: (n: string, ts: number) => `night:${String(chainId || 43113)}:${String(roomId)}:${dayCount || 0}:${actionType}:${String(targetAddress).toLowerCase()}:${n}:${ts}`,
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
@@ -187,8 +187,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress: String(mainWallet), signerAddress: effectiveSigner,
         nonce, timestamp, chainId,
-        buildLegacyMessage: () => `resolve-night:${chainId || 43113}:${roomId}`,
-        buildModernMessage: (n: string, ts: number) => `resolve-night:${chainId || 43113}:${roomId}:${n}:${ts}`,
+        buildLegacyMessage: () => `resolve-night:${String(chainId || 43113)}:${String(roomId)}`,
+        buildModernMessage: (n: string, ts: number) => `resolve-night:${String(chainId || 43113)}:${String(roomId)}:${n}:${ts}`,
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 

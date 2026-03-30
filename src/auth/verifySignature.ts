@@ -66,10 +66,16 @@ export function createAuthService(ctx: AuthContext) {
         });
 
         if (!valid) {
-          console.log(`[AUTH-DEBUG] Modern Sig Fail. Signer: ${normalizedSigner}`);
-          console.log(`[AUTH-DEBUG] Modern Message: "${modern}"`);
-          console.log(`[AUTH-DEBUG] Legacy Message: "${legacy}"`);
-          console.log(`[AUTH-DEBUG] Signature (prefix): ${signature?.slice(0, 10)}...`);
+          try {
+            const recovered = await recoverMessageAddress({ message: modern, signature: signature as `0x${string}` });
+            console.log(`[AUTH-DEBUG] Modern Sig Fail. Signer: ${normalizedSigner}`);
+            console.log(`[AUTH-DEBUG] Recovered: ${recovered.toLowerCase()}`);
+            console.log(`[AUTH-DEBUG] Modern Message: "${modern}"`);
+            console.log(`[AUTH-DEBUG] Legacy Message: "${legacy}"`);
+            console.log(`[AUTH-DEBUG] Signature (prefix): ${signature?.slice(0, 10)}...`);
+          } catch (e: any) {
+            console.log(`[AUTH-DEBUG] Sig recovery failed: ${e.message}`);
+          }
         }
       }
     }
