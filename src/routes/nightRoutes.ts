@@ -144,15 +144,15 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       const playerRole = roomRoles?.get(String(playerAddress).toLowerCase());
       if (playerRole !== undefined) {
         const required: Record<string, Role> = { kill: Role.MAFIA, heal: Role.DOCTOR, check: Role.DETECTIVE };
-        const req = required[actionType as string];
-        if (req !== undefined && playerRole !== req) return res.status(403).json({ error: `Requires role ${req}` });
+        const reqRole = required[actionType as string];
+        if (reqRole !== undefined && playerRole !== reqRole) return res.status(403).json({ error: `Requires role ${reqRole}` });
       }
 
       const state = getOrCreateNightState(rid, Number(chainId));
       if (state.resolved) return res.status(400).json({ error: 'Night already resolved' });
 
       state.actions.set(String(playerAddress).toLowerCase(), {
-        playerAddress: playerAddress as Address, actionType,
+        playerAddress: playerAddress as Address, actionType: actionType as any,
         targetAddress: targetAddress as Address, timestamp: Date.now(),
       });
       
@@ -173,6 +173,74 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       }
 
       return res.json({ ok: true, actionsReceived: state.actions.size });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/skip-night-action', actionLimiter, async (req, res) => {
+    try {
+      const { roomId, playerAddress, signature, signerAddress, nonce, timestamp, chainId, dayCount } = req.body;
+      if (!roomId || !playerAddress || !signature) return res.status(400).json({ error: 'Missing req fields' });
+
+      const sigCheck = await verifyAuthorizedSignature({
+        roomId: String(roomId), signature: signature as `0x${string}`,
+        playerAddress, signerAddress, nonce, timestamp, chainId,
+        buildLegacyMessage: () => new SignatureBuilder('skip-night', chainId, roomId).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('skip-night', chainId, roomId).withParam(dayCount || 0).withModern(n, ts).build(),
+      });
+      if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
+
+      const rid = BigInt(roomId);
+      const players = await getPlayers(rid, chainId);
+      const player = players.find((p) => p.wallet.toLowerCase() === String(playerAddress).toLowerCase());
+      if (!player || !(Number(player.flags) & FLAGS.ACTIVE)) return res.status(400).json({ error: 'Dead/Not in room' });
+
+      const state = getOrCreateNightState(rid, Number(chainId));
+      if (state.resolved) return res.status(400).json({ error: 'Night already resolved' });
+
+      // Mark as skipped (no actionType or targetAddress)
+      state.actions.set(String(playerAddress).toLowerCase(), {
+        playerAddress: playerAddress as Address, actionType: 'skip',
+        targetAddress: playerAddress as Address, timestamp: Date.now(),
+      });
+      
+      const { rPersistNightState } = await import('../redis.js');
+      if (redis) rPersistNightState(redis, Number(chainId), String(roomId), state);
+
+      const alivePlayers = players.filter((p: any) => !!(Number(p.flags) & FLAGS.ACTIVE));
+      if (allRolePlayersActed(Number(chainId), String(roomId), alivePlayers)) {
+        doResolveNight(rid, store, redis, chainId).catch(() => {});
+      } else if (state.actions.size === 1) {
+        scheduleNightTimeout(rid, store, redis, chainId);
+      }
+
+      return res.json({ ok: true, actionsReceived: state.actions.size });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/investigation-proof', actionLimiter, async (req, res) => {
+    try {
+      const { roomId, detectiveAddress, targetAddress, dayCount, signature, signerAddress, nonce, timestamp, chainId } = req.body;
+      const sigCheck = await verifyAuthorizedSignature({
+        roomId: String(roomId), signature: signature as `0x${string}`,
+        playerAddress: String(detectiveAddress), signerAddress, nonce, timestamp, chainId,
+        buildLegacyMessage: () => new SignatureBuilder('investigate', chainId, roomId).withAddress(targetAddress).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('investigate', chainId, roomId).withParam(dayCount || 0).withAddress(targetAddress).withModern(n, ts).build(),
+      });
+      if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
+
+      const roomKey = store.getRoomKey(Number(chainId), String(roomId));
+      const proof = store.investigationProofs.get(roomKey)?.get(String(detectiveAddress).toLowerCase());
+      if (!proof || proof.targetAddress.toLowerCase() !== String(targetAddress).toLowerCase()) {
+        return res.status(404).json({ error: 'No investigation result found for this target tonight' });
+      }
+
+      const roles = store.resolvedRoles.get(roomKey);
+      const role = roles?.get(String(targetAddress).toLowerCase()) ?? 4; // default civilian
+      return res.json({ ok: true, role, source: 'GM_CACHE' });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -210,7 +278,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
   });
 
   router.get('/night-status/:roomId', pollLimiter, (req, res) => {
-    const state = getNightState(BigInt(req.params.roomId));
+    const rid = BigInt(req.params.roomId);
+    const state = getNightState(rid);
     if (!state) return res.json({ active: false, actionsReceived: 0 });
     return res.json({ active: true, actionsReceived: state.actions.size, resolved: state.resolved });
   });

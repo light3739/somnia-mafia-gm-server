@@ -4,7 +4,7 @@ import type { Address } from 'viem';
 
 export interface NightAction {
   playerAddress: Address;
-  actionType: 'kill' | 'heal' | 'check';
+  actionType: 'kill' | 'heal' | 'check' | 'skip';
   targetAddress: Address;
   timestamp: number;
 }

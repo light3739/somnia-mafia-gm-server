@@ -9,6 +9,7 @@ import { GM_ADDRESS } from '../chain.js';
 import { getAllNightStates } from '../game-state.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import type { RedisClient } from '../redis.js';
+import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 export interface SessionRoutesContext {
   store: GMStore;
@@ -43,7 +44,12 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
       const roomNum = Number(roomId);
       const tsNum = Number(timestamp);
       const cidStr = String(chainId || 43113);
-      const message = `register-session:${cidStr}:${String(roomId)}:${normalizedMain}:${normalizedSession}:${nonce}:${String(tsNum)}`;
+      
+      const message = new SignatureBuilder('register-session', cidStr, roomId)
+        .withAddress(normalizedMain)
+        .withAddress(normalizedSession)
+        .withModern(nonce, tsNum)
+        .build();
 
       let recoveredAddress: string;
       try {

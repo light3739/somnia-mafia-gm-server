@@ -68,13 +68,14 @@ export function createAuthService(ctx: AuthContext) {
         if (!valid) {
           try {
             const recovered = await recoverMessageAddress({ message: modern, signature: signature as `0x${string}` });
-            console.log(`[AUTH-DEBUG] Modern Sig Fail. Signer: ${normalizedSigner}`);
-            console.log(`[AUTH-DEBUG] Recovered: ${recovered.toLowerCase()}`);
-            console.log(`[AUTH-DEBUG] Modern Message: "${modern}"`);
-            console.log(`[AUTH-DEBUG] Legacy Message: "${legacy}"`);
-            console.log(`[AUTH-DEBUG] Signature (prefix): ${signature?.slice(0, 10)}...`);
+            console.warn(`[AUTH] Signature Verification Failed!`);
+            console.warn(`  - Expected Signer (from req): ${normalizedSigner}`);
+            console.warn(`  - Recovered Signer (from sig): ${recovered.toLowerCase()}`);
+            console.warn(`  - Message being verified: "${modern}"`);
+            console.warn(`  - Signature used: ${signature.slice(0, 20)}...`);
+            console.warn(`  - Player: ${normalizedPlayer}, Room: ${roomId}, Chain: ${chainId}, Nonce: ${nonce}`);
           } catch (e: any) {
-            console.log(`[AUTH-DEBUG] Sig recovery failed: ${e.message}`);
+            console.error(`[AUTH] Sig recovery failed: ${e.message}`);
           }
         }
       }
