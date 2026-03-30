@@ -9,6 +9,8 @@ import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
+import { logger } from '../utils/logger.js';
+
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 
 export interface RoomRoutesContext {
@@ -53,7 +55,7 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
           room = await getRoom(BigInt(roomId), chainId ? Number(chainId) : undefined);
           if (room?.host && room.host !== ZERO_ADDR) break;
         } catch (e: any) {
-          console.warn(`[room-password] Room lookup failed: ${e.message}`);
+          logger.warn({ roomId, err: e.message }, `[room-password] Room lookup failed (attempt ${i + 1})`);
         }
         await new Promise(r => setTimeout(r, 1000 * (i + 1)));
       }
@@ -78,9 +80,10 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
         (store as any).__roomPasswords[key] = passHash;
       }
 
-      console.log(`[room-password] Room ${roomId}: set by ${hostAddress}`);
+      logger.info({ roomId, host: hostAddress, chainId }, `[room-password] Room password set successfully`);
       return res.json({ success: true });
     } catch (err: any) {
+      logger.error({ err, roomId: req.body?.roomId }, '[room-password] Internal error');
       return res.status(500).json({ error: err.message });
     }
   });
@@ -108,8 +111,10 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
       }
 
       const gmSignature = await signJoinPermit(BigInt(roomId), playerAddress as `0x${string}`, chainId ? Number(chainId) : avalancheFuji.id);
+      logger.info({ roomId, player: playerAddress, chainId }, '[request-join] Join permit granted');
       return res.json({ success: true, gmSignature });
     } catch (err: any) {
+      logger.error({ err, roomId: req.body?.roomId }, '[request-join] Internal error');
       return res.status(500).json({ error: err.message });
     }
   });
@@ -137,6 +142,7 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
         })),
       });
     } catch (err: any) {
+      // Don't log normal 404s/errors for polling unless it's unexpected
       return res.status(500).json({ error: err.message });
     }
   });

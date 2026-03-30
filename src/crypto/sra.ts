@@ -36,6 +36,7 @@ export function getCardOffset(roomId: number | string | bigint): number {
 }
 
 import { Role } from '../types/contract.js';
+import { logger } from '../utils/logger.js';
 
 export function roleFromCardValue(cardValue: string, roomId: number | string | bigint): Role {
   const rid = BigInt(roomId || 0n);
@@ -48,7 +49,7 @@ export function roleFromCardValue(cardValue: string, roomId: number | string | b
     case 3: return Role.DETECTIVE;
     case 4: return Role.CITIZEN;
     default:
-      console.warn(`[roleFromCardValue] Unexpected value: card=${cardValue}, offset=${offset}, decoded=${n}, roomId=${roomId}`);
+      logger.warn({ cardValue, offset: offset.toString(), decoded: nv, roomId: String(roomId) }, '[roleFromCardValue] Unexpected card value decoded');
       return Role.NONE;
   }
 }

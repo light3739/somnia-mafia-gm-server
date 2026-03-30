@@ -28,11 +28,14 @@ export const somniaTestnet = defineChain({
   testnet: true,
 });
 
+import { logger } from './utils/logger.js';
+
 if (!process.env.GM_PRIVATE_KEY) {
   throw new Error('FATAL: GM_PRIVATE_KEY is missing from environment variables');
 }
 const gmAccount = privateKeyToAccount(process.env.GM_PRIVATE_KEY as Hex);
 export const GM_ADDRESS = gmAccount.address;
+logger.info(`[chain] GM Service initialized with address: ${GM_ADDRESS}`);
 
 const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x9f11a8c79d9c59071b4f64f40b0a35cb56645149') as Address;
 const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0xe5437f7857cf7abe40de67e8f462b87f9c8eecc8') as Address;
@@ -134,9 +137,9 @@ export async function resolveNight(roomId: bigint, killTarget: Address, healTarg
     args: [roomId, killTarget, healTarget],
     chain: null,
   });
-  console.log(`[chain] resolveNightAsGameMaster tx: ${hash} on chainId ${chainId}`);
+  logger.info(`[chain] resolveNightAsGameMaster tx: ${hash} on chainId ${chainId}`);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  console.log(`[chain] confirmed in block ${receipt.blockNumber}, status: ${receipt.status}`);
+  logger.info(`[chain] confirmed in block ${receipt.blockNumber}, status: ${receipt.status}`);
   return { hash, receipt };
 }
 
@@ -146,10 +149,10 @@ export async function assertChainConfigOrThrow() {
     try {
       const rpcChainId = await client.getChainId();
       if (rpcChainId !== cid) {
-        console.warn(`[chain] Warning: Chain ${cid} not responding correctly (got ${rpcChainId})`);
+        logger.warn(`[chain] Warning: Chain ${cid} not responding correctly (got ${rpcChainId})`);
       }
     } catch (e: any) {
-      console.warn(`[chain] Warning: Chain ${cid} error: ${e.message}`);
+      logger.warn(`[chain] Warning: Chain ${cid} error: ${e.message}`);
     }
   }
 }

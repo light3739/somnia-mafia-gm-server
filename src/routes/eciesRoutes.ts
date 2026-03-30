@@ -11,6 +11,8 @@ import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
+import { logger } from '../utils/logger.js';
+
 export interface EciesRoutesContext {
   store: GMStore;
   redis: RedisClient;
@@ -50,6 +52,7 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       rPersistRoomChain(redis, Number(chainId), String(roomId));
     }
     
+    logger.info({ roomId, player: normalizedAddr, chainId }, '[register-pubkey] ECIES pubkey registered');
     return res.json({ ok: true });
   });
 
@@ -74,6 +77,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
         rPersistRoomChain(redis, Number(chainId), String(roomId));
       }
 
+      logger.info({ roomId, player: normalizedPlayer, chainId }, '[submit-sra-key] SRA key updated');
+
       // Try pre-cache
       const players = await getPlayers(BigInt(roomId), chainId);
       
@@ -84,7 +89,7 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       const missingKeys = shufflerAddrs.filter(addr => !roomSraKeys.has(addr));
 
       if (shufflerAddrs.length > 0 && missingKeys.length === 0) {
-        console.log(`[ECIES] Room ${roomId} has all ${shufflerAddrs.length} shuffler SRA keys. Resolving roles...`);
+        logger.info({ roomId, shufflersCount: shufflerAddrs.length }, '[ECIES] All SRA keys received. Resolving roles...');
         const { public: publicClient, diamond } = getChainConfig(chainId);
         const deck = await publicClient.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [BigInt(roomId)] }) as string[];
         
@@ -99,19 +104,26 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
             const rawDecoded = sraDecryptCard(deck[i], allKeys);
             const role = roleFromCardValue(rawDecoded, roomId);
             if (role === Role.NONE) {
-              console.warn(`[ECIES] Role resolution failed for index ${i} (${addr}): Decrypted=${rawDecoded}, Source=${deck[i]}, Offset=${getCardOffset(roomId)}`);
+              logger.warn({
+                index: i,
+                player: addr,
+                decrypted: rawDecoded,
+                source: deck[i],
+                offset: getCardOffset(roomId)
+              }, '[ECIES] Role resolution failed');
             } else {
-              console.log(`[ECIES] Role resolved for ${addr}: ${Role[role]} (${role})`);
+              logger.info({ player: addr, role: Role[role] }, '[ECIES] Role resolved');
             }
             roomRoles.set(addr.toLowerCase(), role);
             if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr.toLowerCase(), role);
           }
         });
       } else if (shufflerAddrs.length > 0) {
-        console.log(`[ECIES] Room ${roomId} waiting for SRA keys from:`, missingKeys.join(', '));
+        logger.info({ roomId, missingFrom: missingKeys }, '[ECIES] Waiting for more SRA keys');
       }
       return res.json({ ok: true });
     } catch (err: any) {
+      logger.error({ err, roomId: req.body?.roomId }, '[submit-sra-key] Internal error');
       return res.status(500).json({ error: err.message });
     }
   });
@@ -133,8 +145,6 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
 
       let role = store.resolvedRoles.get(roomKey)?.get(String(playerAddress).toLowerCase());
       if (!role) {
-        // Full logic for manual decrypt if role not pre-cached...
-        // For simplicity in this demo, we assume pre-cache is working or 202 retry.
         return res.status(202).json({ pending: true, message: 'Retry shortly' });
       }
 

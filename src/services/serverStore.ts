@@ -1,4 +1,5 @@
 import { Redis } from 'ioredis';
+import { logger } from '../utils/logger.js';
 
 /**
  * Standard Redis client (works with RedisLabs, Upstash, etc. via connection string)
@@ -19,7 +20,7 @@ const ALLOW_INSECURE_MEMORY_FALLBACK = process.env.ALLOW_INSECURE_MEMORY_FALLBAC
 const FAIL_CLOSED_SECURITY_STORAGE = IS_PRODUCTION && !ALLOW_INSECURE_MEMORY_FALLBACK;
 
 if (redis) {
-    redis.on('error', (err: any) => console.error('[ServerStore] Redis Connection Error:', err));
+    redis.on('error', (err: any) => logger.error({ err }, '[ServerStore] Redis Connection Error'));
 }
 
 /**
@@ -29,7 +30,7 @@ const memoryStore: Record<string, Record<string, string>> = {};
 
 // FIX #25: Warn loudly if memoryStore is used in production
 if (!redis && process.env.NODE_ENV === 'production') {
-    console.error(
+    logger.fatal(
         '\n\n🚨🚨🚨 [ServerStore] CRITICAL: Redis is NOT configured in PRODUCTION!\n' +
         'Security-critical storage is now FAIL-CLOSED (no insecure memory fallback).\n' +
         'Set REDIS_URL (or ALLOW_INSECURE_MEMORY_FALLBACK=true for emergency only).\n🚨🚨🚨\n'
@@ -110,7 +111,7 @@ export class ServerStore {
             const result = await redis.set(key, '1', 'EX', ttlSeconds, 'NX');
             return result === 'OK';
         } catch (e) {
-            console.error('[ServerStore] Redis error (consumeReplayNonce):', e);
+            logger.error({ err: e }, '[ServerStore] Redis error (consumeReplayNonce)');
             return false;
         }
     }
@@ -129,13 +130,13 @@ export class ServerStore {
         const normalizedAddress = address.toLowerCase();
 
         if (!redis) {
-            console.warn(`[ServerStore] Redis not configured. Using MEMORY fallback for Room #${roomId}`);
+            logger.warn({ roomId }, `[ServerStore] Redis not configured. Using MEMORY fallback`);
             if (!memoryStore[key]) memoryStore[key] = {};
             const existing = memoryStore[key][normalizedAddress];
             if (existing) {
                 const parsedExisting = JSON.parse(existing) as PlayerSecret;
                 if (parsedExisting.role !== role || parsedExisting.salt !== salt) {
-                    console.error(`[ServerStore] Secret conflict (memory) for Room #${roomId}, Player ${address}: existingRole=${parsedExisting.role}, newRole=${role}`);
+                    logger.error({ roomId, address, existingRole: parsedExisting.role, newRole: role }, `[ServerStore] Secret conflict (memory)`);
                     return { status: 'conflict', existingRole: parsedExisting.role };
                 }
                 return { status: 'exists_same' };
@@ -150,7 +151,7 @@ export class ServerStore {
             if (existing) {
                 const parsedExisting = JSON.parse(existing) as PlayerSecret;
                 if (parsedExisting.role !== role || parsedExisting.salt !== salt) {
-                    console.error(`[ServerStore] Secret conflict (redis) for Room #${roomId}, Player ${address}: existingRole=${parsedExisting.role}, newRole=${role}`);
+                    logger.error({ roomId, address, existingRole: parsedExisting.role, newRole: role }, `[ServerStore] Secret conflict (redis)`);
                     return { status: 'conflict', existingRole: parsedExisting.role };
                 }
                 await redis.expire(key, GAME_DATA_TTL);
@@ -162,10 +163,10 @@ export class ServerStore {
             // Set/Refresh expiration so abandoned games get cleaned up
             await redis.expire(key, GAME_DATA_TTL);
 
-            console.log(`[ServerStore] Redis: Stored secret for Room #${roomId}, Player ${address}`);
+            logger.info({ roomId, address }, `[ServerStore] Redis: Stored secret`);
             return { status: 'stored' };
         } catch (e) {
-            console.error("[ServerStore] Redis error (store):", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (store)");
             throw e;
         }
     }
@@ -202,7 +203,7 @@ export class ServerStore {
             }
             return parsed;
         } catch (e) {
-            console.error("[ServerStore] Redis error (get):", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (get)");
             return null;
         }
     }
@@ -220,9 +221,9 @@ export class ServerStore {
         }
         try {
             await redis.del(key);
-            console.log(`[ServerStore] Redis: Cleared Room #${roomId}`);
+            logger.info({ roomId }, `[ServerStore] Redis: Cleared Room`);
         } catch (e) {
-            console.error("[ServerStore] Redis error (clear):", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (clear)");
         }
     }
 
@@ -251,7 +252,7 @@ export class ServerStore {
             if (!data) return null;
             return JSON.parse(data);
         } catch (e) {
-            console.error("[ServerStore] Redis error (getDiscussion), falling back to memory:", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (getDiscussion), falling back to memory");
             return fallback();
         }
     }
@@ -277,7 +278,7 @@ export class ServerStore {
         try {
             await redis.set(key, JSON.stringify(state), 'EX', GAME_DATA_TTL);
         } catch (e) {
-            console.error("[ServerStore] Redis error (setDiscussion), falling back to memory:", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (setDiscussion), falling back to memory");
             fallback();
         }
     }
@@ -308,7 +309,7 @@ export class ServerStore {
             // Safety Check: Don't auto-advance if speaking for less than 1.5 seconds (prevents glitches)
             const elapsed = (Date.now() - state.speakerStartTime) / 1000;
             if (!force && elapsed < 1.5) {
-                console.warn(`[ServerStore] Ignored premature advance (elapsed: ${elapsed.toFixed(2)}s)`);
+                logger.warn({ roomId, elapsed }, `[ServerStore] Ignored premature advance`);
                 return state;
             }
 
@@ -356,7 +357,7 @@ export class ServerStore {
         try {
             await redis.del(key);
         } catch (e) {
-            console.error("[ServerStore] Redis error (clearDiscussion):", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (clearDiscussion)");
         }
     }
 
@@ -371,7 +372,7 @@ export class ServerStore {
         const key = `room:avatars:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
-            console.warn(`[ServerStore] Redis not configured. Using MEMORY fallback for avatars`);
+            logger.warn({ roomId }, `[ServerStore] Redis not configured. Using MEMORY fallback for avatars`);
             if (!memoryStore[key]) memoryStore[key] = {};
             memoryStore[key][address.toLowerCase()] = base64Avatar;
             return;
@@ -380,9 +381,9 @@ export class ServerStore {
         try {
             await redis.hset(key, address.toLowerCase(), base64Avatar);
             await redis.expire(key, GAME_DATA_TTL);
-            console.log(`[ServerStore] Stored avatar for Room #${roomId}, Player ${address.slice(0, 8)}...`);
+            logger.info({ roomId, address }, `[ServerStore] Stored avatar`);
         } catch (e) {
-            console.error("[ServerStore] Redis error (storeAvatar):", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (storeAvatar)");
         }
     }
 
@@ -403,7 +404,7 @@ export class ServerStore {
             const data = await redis.hgetall(key);
             return data || {};
         } catch (e) {
-            console.error("[ServerStore] Redis error (getAvatars):", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (getAvatars)");
             return {};
         }
     }
@@ -423,7 +424,7 @@ export class ServerStore {
             const avatar = await redis.hget(key, address.toLowerCase());
             return avatar || null;
         } catch (e) {
-            console.error("[ServerStore] Redis error (getAvatar):", e);
+            logger.error({ err: e }, "[ServerStore] Redis error (getAvatar)");
             return null;
         }
     }
@@ -454,9 +455,9 @@ export class ServerStore {
         try {
             await redis.hset(key, normalizedAddress, pubKeyHex);
             await redis.expire(key, GAME_DATA_TTL);
-            console.log(`[ServerStore] Stored ECIES pubkey for Room #${roomId}, Player ${address.slice(0, 8)}...`);
+            logger.info({ roomId, address }, `[ServerStore] Stored ECIES pubkey`);
         } catch (e) {
-            console.error('[ServerStore] Redis error (storeEciesPubKey):', e);
+            logger.error({ err: e }, '[ServerStore] Redis error (storeEciesPubKey)');
             throw e;
         }
     }
@@ -478,7 +479,7 @@ export class ServerStore {
             const data = await redis.hgetall(key);
             return data || {};
         } catch (e) {
-            console.error('[ServerStore] Redis error (getEciesPubKeys):', e);
+            logger.error({ err: e }, '[ServerStore] Redis error (getEciesPubKeys)');
             return {};
         }
     }
@@ -499,7 +500,7 @@ export class ServerStore {
             const pubKey = await redis.hget(key, address.toLowerCase());
             return pubKey || null;
         } catch (e) {
-            console.error('[ServerStore] Redis error (getEciesPubKey):', e);
+            logger.error({ err: e }, '[ServerStore] Redis error (getEciesPubKey)');
             return null;
         }
     }

@@ -1,7 +1,7 @@
-// src/zk.ts — новый файл
 import * as snarkjs from "snarkjs";
 import { buildPoseidon } from "circomlibjs";
 import path from "path";
+import { logger } from './utils/logger.js';
 
 const WASM = path.join(process.cwd(), "zk/mafia_outcome.wasm");
 const ZKEY = path.join(process.cwd(), "zk/mafia_outcome_final.zkey");
@@ -33,7 +33,7 @@ export async function generateEndGameProof(roomId: string, players: any[]) {
     const mafiaCount = padded.filter(p => p.isActive === 1 && p.role === 1).length;
     const townCount  = padded.filter(p => p.isActive === 1 && p.role === 0).length;
 
-    console.log(`[ZK] Starting proof generation for room ${roomId}...`);
+    logger.info(`[ZK] Starting proof generation for room ${roomId}...`);
     const start = Date.now();
 
     const { proof, publicSignals } = await snarkjs.groth16.fullProve({
@@ -49,7 +49,7 @@ export async function generateEndGameProof(roomId: string, players: any[]) {
     }, WASM, ZKEY);
 
     const duration = Date.now() - start;
-    console.log(`[ZK] Proof generated successfully for room ${roomId} in ${duration}ms`);
+    logger.info(`[ZK] Proof generated successfully for room ${roomId} in ${duration}ms`);
 
     return snarkjs.groth16.exportSolidityCallData(proof, publicSignals);
 }

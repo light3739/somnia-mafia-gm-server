@@ -3,6 +3,7 @@
  */
 import { verifyMessage, recoverMessageAddress, type Address } from 'viem';
 import { getSessionKey } from '../chain.js';
+import { logger } from '../utils/logger.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import { ServerStore } from '../services/serverStore.js';
@@ -68,14 +69,18 @@ export function createAuthService(ctx: AuthContext) {
         if (!valid) {
           try {
             const recovered = await recoverMessageAddress({ message: modern, signature: signature as `0x${string}` });
-            console.warn(`[AUTH] Signature Verification Failed!`);
-            console.warn(`  - Expected Signer (from req): ${normalizedSigner}`);
-            console.warn(`  - Recovered Signer (from sig): ${recovered.toLowerCase()}`);
-            console.warn(`  - Message being verified: "${modern}"`);
-            console.warn(`  - Signature used: ${signature.slice(0, 20)}...`);
-            console.warn(`  - Player: ${normalizedPlayer}, Room: ${roomId}, Chain: ${chainId}, Nonce: ${nonce}`);
+            logger.warn({
+              expectedSigner: normalizedSigner,
+              recoveredSigner: recovered.toLowerCase(),
+              message: modern,
+              signature: signature.slice(0, 20) + '...',
+              player: normalizedPlayer,
+              roomId,
+              chainId,
+              nonce
+            }, '[AUTH] Signature Verification Failed!');
           } catch (e: any) {
-            console.error(`[AUTH] Sig recovery failed: ${e.message}`);
+            logger.error({ err: e }, '[AUTH] Sig recovery failed');
           }
         }
       }

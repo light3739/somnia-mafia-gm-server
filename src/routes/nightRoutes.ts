@@ -17,6 +17,8 @@ import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
+import { logger } from '../utils/logger.js';
+
 const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 180_000);
 const nightTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export const nightChainIds = new Map<string, number | undefined>();
@@ -30,12 +32,16 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
   const state = getNightState(rid);
   if (!state || state.resolved) return;
   const effectiveChainId = Number(chainId || state.chainId);
-  if (state.actions.size === 0) return;
+  if (state.actions.size === 0) {
+    logger.warn({ roomId: String(rid), chainId: effectiveChainId }, '[doResolveNight] No actions to resolve');
+    return;
+  }
 
   state.resolved = true;
-  const roomKey = store.getRoomKey(effectiveChainId, String(rid));
+  const roomIdStr = String(rid);
+  const roomKey = store.getRoomKey(effectiveChainId, roomIdStr);
   const { rPersistNightState, rDeleteNightState } = await import('../redis.js');
-  if (redis) rPersistNightState(redis, effectiveChainId, String(rid), state);
+  if (redis) rPersistNightState(redis, effectiveChainId, roomIdStr, state);
 
   const allActions = [...state.actions.values()];
 
@@ -49,17 +55,29 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
         roomRoles.get(p.wallet.toLowerCase()) === Role.MAFIA,
       ).length;
     }
-  } catch { /* ... */ }
+  } catch (err: any) {
+    logger.warn({ roomId: roomIdStr, err: err.message }, '[doResolveNight] Player/Role fetch failed during resolve');
+  }
 
   const killTarget = calculateMafiaConsensus(allActions, totalAliveMafia);
   const healTarget = getDoctorHeal(allActions);
 
+  logger.info({
+    roomId: roomIdStr,
+    chainId: effectiveChainId,
+    actionsCount: allActions.length,
+    killTarget,
+    healTarget
+  }, '[doResolveNight] Resolving night on-chain...');
+
   try {
     await resolveNight(rid, killTarget, healTarget, effectiveChainId);
+    logger.info({ roomId: roomIdStr }, '[doResolveNight] Night resolved successfully');
   } catch (err: any) {
+    logger.error({ roomId: roomIdStr, err }, '[doResolveNight] On-chain resolution failed');
     if (getNightState(rid)) {
       getNightState(rid)!.resolved = false;
-      if (redis) rPersistNightState(redis, effectiveChainId, String(rid), getNightState(rid)!);
+      if (redis) rPersistNightState(redis, effectiveChainId, roomIdStr, getNightState(rid)!);
     }
     throw err;
   } finally {
@@ -67,7 +85,7 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
     nightChainIds.delete(roomKey);
   }
   clearNightState(rid);
-  if (redis) rDeleteNightState(redis, effectiveChainId, String(rid));
+  if (redis) rDeleteNightState(redis, effectiveChainId, roomIdStr);
 }
 
 export function scheduleNightTimeout(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): void {
@@ -78,7 +96,10 @@ export function scheduleNightTimeout(rid: bigint, store: GMStore, redis: RedisCl
     nightTimers.delete(roomKey);
     const s = getNightState(rid);
     if (!s || s.resolved) return;
-    doResolveNight(rid, store, redis, chainId).catch(() => {});
+    logger.info({ roomId: String(rid), chainId }, '[NightTimeout] Night resolution timeout reached');
+    doResolveNight(rid, store, redis, chainId).catch((err) => {
+      logger.error({ roomId: String(rid), err }, '[NightTimeout] Auto-resolve failed');
+    });
   }, NIGHT_TIMEOUT_MS);
   nightTimers.set(roomKey, t);
 }

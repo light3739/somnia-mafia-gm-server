@@ -4,6 +4,7 @@
 import { Redis } from 'ioredis';
 import type { RoomNightState, NightAction } from './game-state.js';
 import { Role } from './types/contract.js';
+import { logger } from './utils/logger.js';
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
 const TTL = 48 * 60 * 60; // 48 hours in seconds
@@ -25,11 +26,11 @@ export async function connectRedis(): Promise<void> {
 
   client.on('connect', () => {
     _redis = client;
-    console.log(`[redis] Connected: ${REDIS_URL}`);
+    logger.info(`[redis] Connected: ${REDIS_URL}`);
   });
 
   client.on('error', (err) => {
-    console.error(`[redis] Error: ${err.message}`);
+    logger.error(`[redis] Error: ${err.message}`);
   });
 
   try {
@@ -54,7 +55,7 @@ const K = {
 // ─── Fire-and-forget write helper ────────────────────────
 function fw(redis: RedisClient, fn: (r: Redis) => Promise<unknown>): void {
   if (!redis) return;
-  fn(redis).catch((e: any) => console.error('[redis] write error:', e.message));
+  fn(redis).catch((e: any) => logger.error({ err: e }, '[redis] write error'));
 }
 
 // ─── Per-entry write helpers ─────────────────────────────

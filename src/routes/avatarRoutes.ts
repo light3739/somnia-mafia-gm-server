@@ -8,6 +8,8 @@ import type { GMStore } from '../stores/index.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
+import { logger } from '../utils/logger.js';
+
 export interface AvatarRoutesContext {
   store: GMStore;
   verifyAuthorizedSignature: any;
@@ -27,6 +29,7 @@ export function createAvatarRoutes(ctx: AvatarRoutesContext) {
       const avatars = await ServerStore.getAvatars(String(roomId), String(chainId || 43113));
       return res.json({ avatars });
     } catch (err: any) {
+      logger.error({ err, roomId: req.params.roomId }, '[getAvatars] Failed');
       return res.status(500).json({ error: err.message });
     }
   });
@@ -56,8 +59,10 @@ export function createAvatarRoutes(ctx: AvatarRoutesContext) {
       }
 
       await ServerStore.storeAvatar(String(roomId), String(address), String(avatar), String(chainId || 43113));
+      logger.info({ roomId, player: address, chainId }, '[storeAvatar] Avatar updated');
       return res.json({ success: true });
     } catch (err: any) {
+      logger.error({ err, roomId: req.body?.roomId, player: req.body?.address }, '[storeAvatar] Internal error');
       return res.status(500).json({ error: err.message });
     }
   });

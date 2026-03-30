@@ -9,6 +9,8 @@ import type { GMStore } from '../stores/index.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
+import { logger } from '../utils/logger.js';
+
 export interface DiscussionRoutesContext {
   store: GMStore;
   verifyAuthorizedSignature: any;
@@ -106,6 +108,7 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
         isMyTurn
       });
     } catch (err: any) {
+      logger.error({ err, roomId: req.query.roomId }, '[getDiscussion] Failed');
       return res.status(500).json({ error: err.message });
     }
   });
@@ -153,6 +156,7 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
           delayDuration: 5
         };
         await ServerStore.setDiscussionState(String(roomId), Number(dayCount || 1), newState, Number(chainId || 43113));
+        logger.info({ roomId, dayCount, chainId }, '[discussion] Discussion started');
         return res.json({ ok: true });
       }
 
@@ -171,11 +175,13 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
         }
 
         const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, true, Number(chainId || 43113));
+        logger.info({ roomId, dayCount, skippedBy: playerAddress, nextIndex: newState?.currentSpeakerIndex }, '[discussion] Speaker skipped');
         return res.json({ ok: true, newState });
       }
 
       return res.status(400).json({ error: 'Unknown action' });
     } catch (err: any) {
+      logger.error({ err, roomId: req.body?.roomId, player: req.body?.playerAddress }, '[discussion] Internal error');
       return res.status(500).json({ error: err.message });
     }
   });

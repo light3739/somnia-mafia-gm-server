@@ -20,6 +20,8 @@ import { createDiscussionRoutes } from './routes/discussionRoutes.js';
 import { createSessionRoutes } from './routes/sessionRoutes.js';
 import { createAvatarRoutes } from './routes/avatarRoutes.js';
 
+import { logger } from './utils/logger.js';
+
 dotenv.config();
 
 const app = express();
@@ -32,6 +34,22 @@ const auth = createAuthService({ store, redis: getRedis() });
 app.use(cors());
 app.set('trust proxy', 1); // Enable correct IP detection behind Nginx/Cloudflare
 app.use(express.json({ limit: '10mb' }));
+
+// Request Logging Middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info({
+      method: req.method,
+      url: req.url,
+      status: res.statusCode,
+      duration: `${duration}ms`,
+      ip: req.ip,
+    }, 'Inbound Request');
+  });
+  next();
+});
 
 // Rate Limiting
 const pollLimiter = rateLimit({ windowMs: 1000, max: 20, message: { error: 'Too many requests' } });
@@ -54,23 +72,23 @@ app.use(createAvatarRoutes(routesCtx as any));
 
 // Lifecycle
 async function start() {
-  console.log('[main] Starting Mafia GM Server...');
+  logger.info('[main] Starting Mafia GM Server...');
   await connectRedis();
   const redis = getRedis();
   
   if (redis) {
-    console.log('[main] Bootstrapping from Redis...');
+    logger.info('[main] Bootstrapping from Redis...');
     await bootstrap(store, redis);
   } else {
-    console.warn('[main] Redis not available, starting with empty memory.');
+    logger.warn('[main] Redis not available, starting with empty memory.');
   }
 
   app.listen(port, () => {
-    console.log(`[main] GM Server listening on port ${port}`);
+    logger.info(`[main] GM Server listening on port ${port}`);
   });
 }
 
 start().catch(err => {
-  console.error('[main] Fatal crash during startup:', err);
+  logger.error(err, '[main] Fatal crash during startup');
   process.exit(1);
 });

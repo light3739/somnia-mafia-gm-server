@@ -11,6 +11,8 @@ import { Mutex } from 'async-mutex';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
+import { logger } from '../utils/logger.js';
+
 const zkMutex = new Mutex();
 
 export interface WinRoutesContext {
@@ -31,6 +33,7 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       const commitment = await calculatePoseidon([BigInt(mappedRole), BigInt("0x" + (salt.startsWith('0x') ? salt.slice(2) : salt))]);
       return res.json({ commitment });
     } catch (e: any) {
+      logger.error({ err: e.message }, '[hash-role] Poseidon calculation failed');
       return res.status(500).json({ error: e.message });
     }
   });
@@ -53,12 +56,17 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       // Optional: Verify commitment against role+salt
       const mappedRole = Number(role) === 1 ? 1 : 0;
       const computed = await calculatePoseidon([BigInt(mappedRole), BigInt("0x" + salt.replace("0x",""))]);
-      if (computed !== commitment) return res.status(400).json({ error: 'Commitment mismatch' });
+      if (computed !== commitment) {
+        logger.warn({ roomId, player: playerAddress, computed, received: commitment }, '[submit-role-secret] Commitment mismatch');
+        return res.status(400).json({ error: 'Commitment mismatch' });
+      }
 
       await ServerStore.storeSecret(String(roomId), String(playerAddress), Number(role), String(salt), String(commitment), chainId);
+      logger.info({ roomId, player: playerAddress, role }, '[submit-role-secret] Secret stored');
       
       return res.json({ ok: true });
     } catch (e: any) {
+      logger.error({ err: e.message, roomId: req.body?.roomId, player: req.body?.playerAddress }, '[submit-role-secret] Internal error');
       return res.status(500).json({ error: e.message });
     }
   });
@@ -81,8 +89,14 @@ export function createWinRoutes(ctx: WinRoutesContext) {
           else if (r !== undefined && r !== Role.NONE) townCount++;
         }
       }
-      if (mafiaCount === 0) return res.json({ winDetected: true, result: 'TOWN_WIN' });
-      if (mafiaCount >= townCount) return res.json({ winDetected: true, result: 'MAFIA_WIN' });
+      if (mafiaCount === 0) {
+        logger.info({ roomId: req.params.roomId }, '[win-check] Town wins detected');
+        return res.json({ winDetected: true, result: 'TOWN_WIN' });
+      }
+      if (mafiaCount >= townCount) {
+        logger.info({ roomId: req.params.roomId }, '[win-check] Mafia wins detected');
+        return res.json({ winDetected: true, result: 'MAFIA_WIN' });
+      }
       return res.json({ winDetected: false });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
@@ -90,13 +104,16 @@ export function createWinRoutes(ctx: WinRoutesContext) {
   });
 
   router.post('/end-game-zk/:roomId', heavyLimiter, async (req, res) => {
+    const roomId = req.params.roomId;
     try {
-      const rid = req.params.roomId;
       const cid = req.body.chainId;
-      const secrets = await ServerStore.getRoomSecrets(rid, cid);
-      if (!secrets) return res.status(400).json({ error: 'No secrets found for this room. Players must submit secrets first.' });
+      const secrets = await ServerStore.getRoomSecrets(roomId, cid);
+      if (!secrets) {
+        logger.warn({ roomId }, '[end-game-zk] No secrets found');
+        return res.status(400).json({ error: 'No secrets found for this room. Players must submit secrets first.' });
+      }
       
-      const players = await getPlayers(BigInt(rid), cid);
+      const players = await getPlayers(BigInt(roomId), cid);
       const zkInput = players.map((p: any) => {
         const addr = p.wallet.toLowerCase();
         const s = secrets[addr];
@@ -108,9 +125,17 @@ export function createWinRoutes(ctx: WinRoutesContext) {
           isActive: alive ? 1 : 0,
         };
       });
-      const callData = await zkMutex.runExclusive(() => generateEndGameProof(rid, zkInput));
+
+      logger.info({ roomId }, '[end-game-zk] Starting ZK proof generation...');
+      const callData = await zkMutex.runExclusive(async () => {
+        const start = Date.now();
+        const data = await generateEndGameProof(roomId, zkInput);
+        logger.info({ roomId, duration: Date.now() - start }, '[end-game-zk] ZK proof generated successfully');
+        return data;
+      });
       return res.json({ callData });
     } catch (err: any) {
+      logger.error({ err: err.message, roomId }, '[end-game-zk] ZK proof generation failed');
       return res.status(500).json({ error: err.message });
     }
   });
