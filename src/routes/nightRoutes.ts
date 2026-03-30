@@ -15,6 +15,7 @@ import {
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
+import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 180_000);
 const nightTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -122,8 +123,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       const sigCheck = await verifyAuthorizedSignature({
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress, signerAddress, nonce, timestamp, chainId,
-        buildLegacyMessage: () => `night:${String(chainId || 43113)}:${String(roomId)}:${actionType}:${String(targetAddress).toLowerCase()}`,
-        buildModernMessage: (n: string, ts: number) => `night:${String(chainId || 43113)}:${String(roomId)}:${dayCount || 0}:${actionType}:${String(targetAddress).toLowerCase()}:${n}:${ts}`,
+        buildLegacyMessage: () => new SignatureBuilder('night', chainId, roomId).withParam(actionType).withAddress(targetAddress).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('night', chainId, roomId).withParam(dayCount || 0).withParam(actionType).withAddress(targetAddress).withModern(n, ts).build(),
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
@@ -187,8 +188,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress: String(mainWallet), signerAddress: effectiveSigner,
         nonce, timestamp, chainId,
-        buildLegacyMessage: () => `resolve-night:${String(chainId || 43113)}:${String(roomId)}`,
-        buildModernMessage: (n: string, ts: number) => `resolve-night:${String(chainId || 43113)}:${String(roomId)}:${n}:${ts}`,
+        buildLegacyMessage: () => new SignatureBuilder('resolve-night', chainId, roomId).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('resolve-night', chainId, roomId).withModern(n, ts).build(),
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 

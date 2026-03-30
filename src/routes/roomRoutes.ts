@@ -7,6 +7,7 @@ import { getRoom, getPlayers, signJoinPermit, getTournament, isTournamentPartici
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
+import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 
@@ -39,8 +40,8 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
         playerAddress: String(hostAddress),
         signature: String(signature) as `0x${string}`,
         signerAddress, nonce, timestamp, chainId,
-        buildLegacyMessage: () => `setRoomPassword:${String(chainId || 43113)}:${String(roomId)}:${String(hostAddress).toLowerCase()}`,
-        buildModernMessage: (n: string, ts: number) => `setRoomPassword:${String(chainId || 43113)}:${String(roomId)}:${String(hostAddress).toLowerCase()}:${n}:${ts}`,
+        buildLegacyMessage: () => new SignatureBuilder('setRoomPassword', chainId, roomId).withAddress(hostAddress).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('setRoomPassword', chainId, roomId).withAddress(hostAddress).withModern(n, ts).build(),
       });
 
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });

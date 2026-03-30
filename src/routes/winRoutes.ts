@@ -9,6 +9,7 @@ import { ServerStore } from '../services/serverStore.js';
 import { generateEndGameProof, calculatePoseidon } from '../zk.js';
 import { Mutex } from 'async-mutex';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
+import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 const zkMutex = new Mutex();
 
@@ -44,8 +45,8 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       const sigCheck = await verifyAuthorizedSignature({
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress: String(playerAddress), signerAddress, nonce, timestamp, chainId,
-        buildLegacyMessage: () => `submit-role-secret:${String(chainId || 43113)}:${String(roomId)}:${role}:${salt}:${commitment}`,
-        buildModernMessage: (n: string, ts: number) => `submit-role-secret:${String(chainId || 43113)}:${String(roomId)}:${role}:${salt}:${commitment}:${n}:${ts}`,
+        buildLegacyMessage: () => new SignatureBuilder('submit-role-secret', chainId, roomId).withParam(role).withParam(salt).withParam(commitment).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('submit-role-secret', chainId, roomId).withParam(role).withParam(salt).withParam(commitment).withModern(n, ts).build(),
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 

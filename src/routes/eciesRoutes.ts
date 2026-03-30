@@ -9,6 +9,7 @@ import { sraDecryptCard, roleFromCardValue } from '../crypto/sra.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
+import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 export interface EciesRoutesContext {
   store: GMStore;
@@ -30,8 +31,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     const sigCheck = await verifyAuthorizedSignature({
       roomId: String(roomId), signature: signature as `0x${string}`,
       playerAddress: normalizedAddr, signerAddress, nonce, timestamp, chainId,
-      buildLegacyMessage: () => `register-pubkey:${String(chainId || 43113)}:${String(roomId)}:${normalizedAddr}:${pubkey}`,
-      buildModernMessage: (n: string, ts: number) => `register-pubkey:${String(chainId || 43113)}:${String(roomId)}:${normalizedAddr}:${pubkey}:${n}:${ts}`,
+      buildLegacyMessage: () => new SignatureBuilder('register-pubkey', chainId, roomId).withAddress(normalizedAddr).withParam(pubkey).build(),
+      buildModernMessage: (n: string, ts: number) => new SignatureBuilder('register-pubkey', chainId, roomId).withAddress(normalizedAddr).withParam(pubkey).withModern(n, ts).build(),
     });
     if (!sigCheck.ok) return res.status(sigCheck.status || 401).json({ error: sigCheck.error });
 
@@ -58,8 +59,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       const sigCheck = await verifyAuthorizedSignature({
         roomId: String(roomId), signature: signature as `0x${string}`,
         playerAddress: String(playerAddress), signerAddress, nonce, timestamp, chainId,
-        buildLegacyMessage: () => `submit-key:${String(chainId || 43113)}:${String(roomId)}:${sraKey}`,
-        buildModernMessage: (n: string, ts: number) => `submit-key:${String(chainId || 43113)}:${String(roomId)}:${sraKey}:${n}:${ts}`,
+        buildLegacyMessage: () => new SignatureBuilder('submit-key', chainId, roomId).withParam(sraKey).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('submit-key', chainId, roomId).withParam(sraKey).withModern(n, ts).build(),
       });
       if (!sigCheck.ok) return res.status(sigCheck.status || 401).json({ error: sigCheck.error });
 
@@ -104,8 +105,8 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       const { playerAddress, signature, signerAddress, nonce, timestamp, chainId } = req.query as Record<string, string>;
       const sigCheck = await verifyAuthorizedSignature({
         roomId, signature: signature as `0x${string}`, playerAddress, signerAddress, nonce, timestamp: Number(timestamp), chainId,
-        buildLegacyMessage: () => `my-role:${String(chainId || 43113)}:${String(roomId)}:${playerAddress.toLowerCase()}`,
-        buildModernMessage: (n: string, ts: number) => `my-role:${String(chainId || 43113)}:${String(roomId)}:${playerAddress.toLowerCase()}:${n}:${ts}`,
+        buildLegacyMessage: () => new SignatureBuilder('my-role', chainId, roomId).withAddress(playerAddress).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('my-role', chainId, roomId).withAddress(playerAddress).withModern(n, ts).build(),
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
