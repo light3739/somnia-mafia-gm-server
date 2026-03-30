@@ -266,8 +266,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       const host = (room.host as string).toLowerCase();
       const isHostOrGM = String(mainWallet).toLowerCase() === host || sigCheck.signer === host || String(mainWallet).toLowerCase() === GM_ADDRESS.toLowerCase();
       
-      if (!isHostOrGM && !(Number(room.phaseDeadline) > 0 && Math.floor(Date.now() / 1000) > Number(room.phaseDeadline) + 30)) {
-        return res.status(403).json({ error: 'Unauthorized manual resolve' });
+      if (!isHostOrGM && !(Number(room.phaseDeadline) > 0 && Math.floor(Date.now() / 1000) > Number(room.phaseDeadline) + 2)) {
+        return res.status(403).json({ error: 'Unauthorized manual resolve. Wait for deadline + 2s.' });
       }
 
       await doResolveNight(rid, store, redis, chainId);

@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { getRoom, getPlayers, getChainConfig, DIAMOND_ABI, FLAGS, GamePhase } from '../chain.js';
 import { Role } from '../types/contract.js';
 import { eciesEncrypt } from '../ecies.js';
-import { sraDecryptCard, roleFromCardValue } from '../crypto/sra.js';
+import { sraDecryptCard, roleFromCardValue, getCardOffset } from '../crypto/sra.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
@@ -76,22 +76,39 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
 
       // Try pre-cache
       const players = await getPlayers(BigInt(roomId), chainId);
-      const activePlayers = players.filter((p) => (Number(p.flags) & FLAGS.ACTIVE) !== 0);
-      const activeAddrs = activePlayers.map((p) => p.wallet.toLowerCase());
-      if (activeAddrs.every(addr => roomSraKeys.has(addr))) {
+      
+      // We only need keys from players who actually shuffled the deck (marked by FLAG_DECK_COMMITTED)
+      const DECK_COMMITTED = 0x40; // 64
+      const shufflers = players.filter(p => (Number(p.flags) & DECK_COMMITTED) !== 0);
+      const shufflerAddrs = shufflers.map(p => p.wallet.toLowerCase());
+      const missingKeys = shufflerAddrs.filter(addr => !roomSraKeys.has(addr));
+
+      if (shufflerAddrs.length > 0 && missingKeys.length === 0) {
+        console.log(`[ECIES] Room ${roomId} has all ${shufflerAddrs.length} shuffler SRA keys. Resolving roles...`);
         const { public: publicClient, diamond } = getChainConfig(chainId);
         const deck = await publicClient.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [BigInt(roomId)] }) as string[];
-        const order = (store.roomPlayerOrder.get(roomKey) || players.map(p => p.wallet.toLowerCase())) as `0x${string}`[];
-        store.roomPlayerOrder.set(roomKey, order);
-        const allKeys = players.map(p => roomSraKeys.get(p.wallet.toLowerCase())).filter(Boolean) as string[];
+        
+        const allKeys = shufflerAddrs.map(addr => roomSraKeys.get(addr)).filter(Boolean) as string[];
         const roomRoles = store.getRoomMap(store.resolvedRoles, roomKey);
-        order.forEach((addr, i) => {
+        
+        // Final mapping uses all players (even if they didn't shuffle, they get a card index)
+        const allAddrsInOrder = (store.roomPlayerOrder.get(roomKey) || players.map(p => p.wallet.toLowerCase())) as string[];
+        
+        allAddrsInOrder.forEach((addr, i) => {
           if (i < deck.length) {
-            const role = roleFromCardValue(sraDecryptCard(deck[i], allKeys), roomId);
-            roomRoles.set(addr, role);
-            if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr, role);
+            const rawDecoded = sraDecryptCard(deck[i], allKeys);
+            const role = roleFromCardValue(rawDecoded, roomId);
+            if (role === Role.NONE) {
+              console.warn(`[ECIES] Role resolution failed for index ${i} (${addr}): Decrypted=${rawDecoded}, Source=${deck[i]}, Offset=${getCardOffset(roomId)}`);
+            } else {
+              console.log(`[ECIES] Role resolved for ${addr}: ${Role[role]} (${role})`);
+            }
+            roomRoles.set(addr.toLowerCase(), role);
+            if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr.toLowerCase(), role);
           }
         });
+      } else if (shufflerAddrs.length > 0) {
+        console.log(`[ECIES] Room ${roomId} waiting for SRA keys from:`, missingKeys.join(', '));
       }
       return res.json({ ok: true });
     } catch (err: any) {
@@ -171,9 +188,12 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     const cached = store.resolvedRoles.get(roomKey);
     if (!cached) return res.status(202).json({ pending: true });
     
-    const result: Record<string, number> = {};
+    const result: Record<string, string> = {};
+    const roleToString: Record<number, string> = {
+      1: 'MAFIA', 2: 'DOCTOR', 3: 'DETECTIVE', 4: 'CIVILIAN'
+    };
     for (const [addr, role] of cached.entries()) {
-      result[addr.toLowerCase()] = role as number;
+      result[addr.toLowerCase()] = roleToString[role as number] || 'UNKNOWN';
     }
     return res.json({ roles: result });
   });
