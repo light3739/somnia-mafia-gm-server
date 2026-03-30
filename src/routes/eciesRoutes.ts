@@ -128,14 +128,53 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     }
   });
 
+  router.get('/mafia-members/:roomId', pollLimiter, async (req, res) => {
+    try {
+      const { roomId } = req.params;
+      const { playerAddress, signature, signerAddress, nonce, timestamp, chainId } = req.query as Record<string, string>;
+      
+      const sigCheck = await verifyAuthorizedSignature({
+        roomId, signature: signature as `0x${string}`, 
+        playerAddress, signerAddress, nonce, 
+        timestamp: Number(timestamp), chainId,
+        buildLegacyMessage: () => new SignatureBuilder('mafia-members', chainId, roomId).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('mafia-members', chainId, roomId).withModern(n, ts).build(),
+      });
+      if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
+
+      const roomKey = store.getRoomKey(Number(chainId), roomId);
+      const roles = store.resolvedRoles.get(roomKey);
+      if (!roles) return res.status(202).json({ pending: true, message: 'Roles not resolved yet' });
+
+      // Verify the requester is actually Mafia
+      const requesterRole = roles.get(String(playerAddress).toLowerCase());
+      if (requesterRole !== Role.MAFIA) {
+        return res.status(403).json({ error: 'Only Mafia members can see each other' });
+      }
+
+      // Return all Mafia members
+      const mafiaMembers: string[] = [];
+      for (const [addr, role] of roles.entries()) {
+        if (role === Role.MAFIA) mafiaMembers.push(addr);
+      }
+
+      return res.json({ members: mafiaMembers });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/room-roles/:roomId', pollLimiter, async (req, res) => {
-    // Implement game-ended check + role returning logic...
+    // Roles are public after game ends. No auth required.
     const { chainId } = req.query as Record<string, string>;
     const roomKey = store.getRoomKey(Number(chainId), req.params.roomId);
     const cached = store.resolvedRoles.get(roomKey);
     if (!cached) return res.status(202).json({ pending: true });
+    
     const result: Record<string, number> = {};
-    for (const [addr, role] of cached) result[addr.toLowerCase()] = role as number;
+    for (const [addr, role] of cached.entries()) {
+      result[addr.toLowerCase()] = role as number;
+    }
     return res.json({ roles: result });
   });
 

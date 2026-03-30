@@ -13,6 +13,8 @@ import { createRoomRoutes } from './routes/roomRoutes.js';
 import { createNightRoutes } from './routes/nightRoutes.js';
 import { createEciesRoutes } from './routes/eciesRoutes.js';
 import { createWinRoutes } from './routes/winRoutes.js';
+import { createDiscussionRoutes } from './routes/discussionRoutes.js';
+import { createAvatarRoutes } from './routes/avatarRoutes.js';
 import { bootstrap } from './startup/bootstrap.js';
 
 const app = express();
@@ -55,6 +57,8 @@ async function start(): Promise<void> {
     app.use(createNightRoutes({ store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter, heavyLimiter }));
     app.use(createEciesRoutes({ store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter }));
     app.use(createWinRoutes({ store, verifyAuthorizedSignature, pollLimiter, heavyLimiter }));
+    app.use(createDiscussionRoutes({ store, verifyAuthorizedSignature, actionLimiter, pollLimiter }));
+    app.use(createAvatarRoutes({ store, verifyAuthorizedSignature, actionLimiter, pollLimiter }));
 
     const PORT = Number(process.env.PORT) || 3001;
     app.listen(PORT, '0.0.0.0', () => {
