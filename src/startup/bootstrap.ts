@@ -55,10 +55,14 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
         if (val) {
           const data = JSON.parse(val);
           const walletWithChain = key.replace('gm:session:', ''); // format: 'chainId:wallet'
-          store.sessionCache.set(walletWithChain, {
-            sessionAddress: data.sessionAddress,
-            roomId: data.roomId,
-            chainId: data.chainId || 43113,
+          const [cidStr, ...walletParts] = walletWithChain.split(':');
+          const cacheKey = walletWithChain;
+          const normalizedSession = data.sessionAddress;
+          const roomKeyStr = String(data.roomId);
+          store.sessionCache.set(cacheKey, {
+            sessionAddress: normalizedSession,
+            roomId: roomKeyStr,
+            chainId: Number(cidStr || data.chainId || 43113),
           });
         }
       }
@@ -88,7 +92,7 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
         const roomRoles = store.getRoomMap(store.resolvedRoles, roomId);
         order.forEach((addr, i) => {
           if (i < deck.length) {
-            const r = roleFromCardValue(sraDecryptCard(deck[i], allKeys), Number(ridInKey));
+            const r = roleFromCardValue(sraDecryptCard(deck[i], allKeys), ridInKey);
             roomRoles.set(addr, r);
             rPersistRole(redisClient, cidNum, ridInKey, addr, r);
           }

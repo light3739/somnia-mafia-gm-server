@@ -87,7 +87,7 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
         const roomRoles = store.getRoomMap(store.resolvedRoles, roomKey);
         order.forEach((addr, i) => {
           if (i < deck.length) {
-            const role = roleFromCardValue(sraDecryptCard(deck[i], allKeys), Number(roomId));
+            const role = roleFromCardValue(sraDecryptCard(deck[i], allKeys), roomId);
             roomRoles.set(addr, role);
             if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr, role);
           }

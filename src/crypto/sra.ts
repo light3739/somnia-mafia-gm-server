@@ -29,20 +29,26 @@ export function sraDecryptCard(encryptedCard: string, decryptionKeys: string[]):
   return val.toString();
 }
 
-export function getCardOffset(roomId: number): number {
-  return 100 + ((roomId * 7919 + 104729) % 10000);
+export function getCardOffset(roomId: number | string | bigint): number {
+  const rid = BigInt(roomId);
+  const result = 100n + ((rid * 7919n + 104729n) % 10000n);
+  return Number(result);
 }
 
 import { Role } from '../types/contract.js';
 
-export function roleFromCardValue(cardValue: string, roomId: number): Role {
-  const offset = getCardOffset(roomId);
-  const n = parseInt(cardValue) - offset;
-  switch (n) {
+export function roleFromCardValue(cardValue: string, roomId: number | string | bigint): Role {
+  const rid = BigInt(roomId || 0n);
+  const offset = BigInt(getCardOffset(rid));
+  const n = BigInt(cardValue) - offset;
+  const nv = Number(n);
+  switch (nv) {
     case 1: return Role.MAFIA;
     case 2: return Role.DOCTOR;
     case 3: return Role.DETECTIVE;
     case 4: return Role.CITIZEN;
-    default: return Role.NONE;
+    default:
+      console.warn(`[roleFromCardValue] Unexpected value: card=${cardValue}, offset=${offset}, decoded=${n}, roomId=${roomId}`);
+      return Role.NONE;
   }
 }

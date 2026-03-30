@@ -41,11 +41,11 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
 
       const normalizedMain = mainWallet.toLowerCase();
       const normalizedSession = sessionAddress.toLowerCase();
-      const roomNum = Number(roomId);
+      const roomIdStr = String(roomId);
       const tsNum = Number(timestamp);
       const cidStr = String(chainId || 43113);
       
-      const message = new SignatureBuilder('register-session', cidStr, roomId)
+      const message = new SignatureBuilder('register-session', cidStr, roomIdStr)
         .withAddress(normalizedMain)
         .withAddress(normalizedSession)
         .withModern(nonce, tsNum)
@@ -76,19 +76,19 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
 
       // Injected store usage
       const cacheKey = `${cidStr}:${normalizedMain}`;
-      store.sessionCache.set(cacheKey, { sessionAddress: normalizedSession, roomId: roomNum, chainId: Number(cidStr) });
+      store.sessionCache.set(cacheKey, { sessionAddress: normalizedSession, roomId: roomIdStr, chainId: Number(cidStr) });
 
       // Injected redis usage
       if (redis) {
         redis.set(
           `gm:session:${cacheKey}`,
-          JSON.stringify({ sessionAddress: normalizedSession, roomId: roomNum, chainId: Number(cidStr) }),
+          JSON.stringify({ sessionAddress: normalizedSession, roomId: roomIdStr, chainId: Number(cidStr) }),
           'EX',
           48 * 60 * 60,
         ).catch(() => {});
       }
 
-      console.log(`[SESSION] Cached session for ${normalizedMain} → ${normalizedSession} (room ${roomNum})`);
+      console.log(`[SESSION] Cached session for ${normalizedMain} → ${normalizedSession} (room ${roomIdStr})`);
       return res.json({ ok: true });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });

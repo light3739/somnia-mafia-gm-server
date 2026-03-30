@@ -23,7 +23,7 @@ export class GMStore {
   public investigationProofs = new Map<string, Map<string, InvestigationProof>>();
 
   // mainWallet.lower() → { sessionAddress, roomId, chainId }
-  public sessionCache = new Map<string, { sessionAddress: string; roomId: number; chainId: number }>();
+  public sessionCache = new Map<string, { sessionAddress: string; roomId: string | number; chainId: number }>();
 
   // roomId string (or composite "chainId:roomId") → chainId number
   public roomChains = new Map<string, number>();

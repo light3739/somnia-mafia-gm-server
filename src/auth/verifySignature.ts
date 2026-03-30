@@ -95,7 +95,7 @@ export function createAuthService(ctx: AuthContext) {
 
     // 3. Session key resolution (Signer vs Player)
     if (normalizedSigner !== normalizedPlayer) {
-      const expectedRoomId = Number(BigInt(roomId));
+      const requestedRoomIdBI = BigInt(roomId);
       const effectiveChainId = Number(chainId || 43113);
       const cacheKey = `${effectiveChainId}:${normalizedPlayer}`;
 
@@ -115,7 +115,7 @@ export function createAuthService(ctx: AuthContext) {
         } catch { /* log fallback silently */ }
       }
 
-      if (cached && cached.sessionAddress === normalizedSigner && cached.roomId === expectedRoomId && cached.chainId === effectiveChainId) {
+      if (cached && cached.sessionAddress === normalizedSigner && BigInt(cached.roomId) === requestedRoomIdBI && cached.chainId === effectiveChainId) {
         return { ok: true, signer: normalizedSigner };
       }
 
@@ -125,10 +125,10 @@ export function createAuthService(ctx: AuthContext) {
           const session = await getSessionKey(normalizedPlayer as Address, effectiveChainId) as any;
           const sessionAddress = String(session.sessionAddress || '').toLowerCase();
           const isActive = Boolean(session.isActive);
-          const sessionRoomId = Number(session.roomId || 0);
+          const sessionRoomIdBI = BigInt(session.roomId || 0n);
 
-          if (sessionAddress === normalizedSigner && isActive && sessionRoomId === expectedRoomId) {
-            store.sessionCache.set(cacheKey, { sessionAddress: normalizedSigner, roomId: expectedRoomId, chainId: effectiveChainId });
+          if (sessionAddress === normalizedSigner && isActive && sessionRoomIdBI === requestedRoomIdBI) {
+            store.sessionCache.set(cacheKey, { sessionAddress: normalizedSigner, roomId: String(requestedRoomIdBI), chainId: effectiveChainId });
             return { ok: true, signer: normalizedSigner };
           }
           if (attempt < 4) await new Promise(r => setTimeout(r, 2000));
