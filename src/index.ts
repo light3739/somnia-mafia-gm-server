@@ -29,13 +29,14 @@ const port = process.env.PORT || 3001;
 const store = new GMStore();
 const auth = createAuthService({ store, redis: getRedis() });
 
+app.use(cors());
+app.set('trust proxy', 1); // Enable correct IP detection behind Nginx/Cloudflare
+app.use(express.json({ limit: '10mb' }));
+
 // Rate Limiting
 const pollLimiter = rateLimit({ windowMs: 1000, max: 20, message: { error: 'Too many requests' } });
-const actionLimiter = rateLimit({ windowMs: 1000, max: 5, message: { error: 'Action rate limit exceeded' } });
-const heavyLimiter = rateLimit({ windowMs: 10000, max: 2, message: { error: 'Heavy action rate limit exceeded' } });
-
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+const actionLimiter = rateLimit({ windowMs: 1000, max: 10, message: { error: 'Action rate limit exceeded' } });
+const heavyLimiter = rateLimit({ windowMs: 20000, max: 15, message: { error: 'Heavy action rate limit exceeded' } });
 
 // Health Check
 app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
