@@ -74,7 +74,8 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
     await resolveNight(rid, killTarget, healTarget, effectiveChainId);
     logger.info({ roomId: roomIdStr }, '[doResolveNight] Night resolved successfully');
   } catch (err: any) {
-    logger.error({ roomId: roomIdStr, err }, '[doResolveNight] On-chain resolution failed');
+    const reason = err.shortMessage || err.cause?.shortMessage || err.message || String(err);
+    logger.error({ roomId: roomIdStr, chainId: effectiveChainId, reason }, '[doResolveNight] On-chain resolution failed');
     if (getNightState(rid)) {
       getNightState(rid)!.resolved = false;
       if (redis) rPersistNightState(redis, effectiveChainId, roomIdStr, getNightState(rid)!);
@@ -189,7 +190,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       const alivePlayers = players.filter((p: any) => !!(Number(p.flags) & FLAGS.ACTIVE));
       if (allRolePlayersActed(Number(chainId), String(roomId), alivePlayers)) {
         doResolveNight(rid, store, redis, chainId).catch(() => {});
-      } else if (state.actions.size === 1) {
+      } else if (!nightTimers.has(store.getRoomKey(Number(chainId), String(roomId)))) {
+        // Start timeout if not already scheduled (regardless of how many actions received)
         scheduleNightTimeout(rid, store, redis, chainId);
       }
 
@@ -232,7 +234,8 @@ export function createNightRoutes(ctx: NightRoutesContext) {
       const alivePlayers = players.filter((p: any) => !!(Number(p.flags) & FLAGS.ACTIVE));
       if (allRolePlayersActed(Number(chainId), String(roomId), alivePlayers)) {
         doResolveNight(rid, store, redis, chainId).catch(() => {});
-      } else if (state.actions.size === 1) {
+      } else if (!nightTimers.has(store.getRoomKey(Number(chainId), String(roomId)))) {
+        // Start timeout if not already scheduled (regardless of how many actions received)
         scheduleNightTimeout(rid, store, redis, chainId);
       }
 
