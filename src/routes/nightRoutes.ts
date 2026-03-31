@@ -121,14 +121,22 @@ export function createNightRoutes(ctx: NightRoutesContext) {
   const allRolePlayersActed = (chainId: number, roomIdStr: string, alivePlayers: ReturnType<typeof Array.prototype.filter>) => {
     const roomKey = store.getRoomKey(chainId, roomIdStr);
     const roles = store.resolvedRoles.get(roomKey);
-    if (!roles) return false;
+    const state = getNightState(BigInt(roomIdStr));
+    if (!roles || !state) return false;
+
     const roleActors = alivePlayers.filter((p) => {
       const r = roles.get(p.wallet.toLowerCase());
       return r !== undefined && r !== Role.CITIZEN && r !== Role.NONE;
     });
-    if (roleActors.length === 0) return false;
-    const state = getNightState(BigInt(roomIdStr));
-    return state && roleActors.every((p) => state.actions.has(p.wallet.toLowerCase()));
+
+    // If there are role actors, we just need them to act.
+    if (roleActors.length > 0) {
+      return roleActors.every((p) => state.actions.has(p.wallet.toLowerCase()));
+    }
+
+    // EDGE CASE: If NO role players are alive, we resolve when EVERYONE alive has signaled readiness (skip).
+    // This stops the night from hanging for 3 mins if e.g. Mafia/Doc/Det are all dead.
+    return alivePlayers.every((p) => state.actions.has(p.wallet.toLowerCase()));
   };
 
   router.post('/night-action', actionLimiter, async (req, res) => {
