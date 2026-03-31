@@ -40,7 +40,7 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
 
     const room: any = await getRoom(BigInt(roomId), chainId);
     const phase = Number(room.phase);
-    if (phase !== GamePhase.REVEAL && phase !== GamePhase.ENDED && phase !== GamePhase.LOBBY) {
+    if (phase !== GamePhase.REVEAL && phase !== GamePhase.ENDED && phase !== GamePhase.LOBBY && phase !== GamePhase.SHUFFLING) {
       return res.status(400).json({ error: 'Unauthorized phase for pubkey' });
     }
 
