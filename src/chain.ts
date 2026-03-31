@@ -138,8 +138,19 @@ export async function resolveNight(roomId: bigint, killTarget: Address, healTarg
     chain: null,
   });
   logger.info(`[chain] resolveNightAsGameMaster tx: ${hash} on chainId ${chainId}`);
-  const receipt = await publicClient.waitForTransactionReceipt({ hash });
-  logger.info(`[chain] confirmed in block ${receipt.blockNumber}, status: ${receipt.status}`);
+
+  // Wait with a 120s timeout so slow Somnia RPCs don't hang forever
+  const receipt = await Promise.race([
+    publicClient.waitForTransactionReceipt({ hash }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('waitForTransactionReceipt timeout after 120s')), 120_000)
+    ),
+  ]);
+
+  logger.info(`[chain] confirmed in block ${(receipt as any).blockNumber}, status: ${(receipt as any).status}`);
+  if ((receipt as any).status === 'reverted') {
+    throw new Error(`resolveNightAsGameMaster reverted in block ${(receipt as any).blockNumber}`);
+  }
   return { hash, receipt };
 }
 
