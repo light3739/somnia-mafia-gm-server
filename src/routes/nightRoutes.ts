@@ -32,10 +32,6 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
   const state = getNightState(rid);
   if (!state || state.resolved) return;
   const effectiveChainId = Number(chainId || state.chainId);
-  if (state.actions.size === 0) {
-    logger.warn({ roomId: String(rid), chainId: effectiveChainId }, '[doResolveNight] No actions to resolve');
-    return;
-  }
 
   state.resolved = true;
   const roomIdStr = String(rid);
