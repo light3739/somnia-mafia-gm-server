@@ -82,10 +82,9 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       // Try pre-cache
       const players = await getPlayers(BigInt(roomId), chainId);
       
-      // We only need keys from players who actually shuffled the deck (marked by FLAG_DECK_COMMITTED)
-      const DECK_COMMITTED = 0x40; // 64
-      const shufflers = players.filter(p => (Number(p.flags) & DECK_COMMITTED) !== 0);
-      const shufflerAddrs = shufflers.map(p => p.wallet.toLowerCase());
+      // We need keys from all players since the sequential shuffle requires everyone's SRA key.
+      // (The DECK_COMMITTED flag might have been cleared by the final revealDeck transaction).
+      const shufflerAddrs = players.map(p => p.wallet.toLowerCase());
       const missingKeys = shufflerAddrs.filter(addr => !roomSraKeys.has(addr));
 
       if (shufflerAddrs.length > 0 && missingKeys.length === 0) {
