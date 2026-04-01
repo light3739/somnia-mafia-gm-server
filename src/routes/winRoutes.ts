@@ -78,9 +78,40 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       const effectiveCid = cid || 43113;
       const roomKey = store.getRoomKey(effectiveCid, req.params.roomId);
       const [room, players] = await Promise.all([getRoom(rid, effectiveCid), getPlayers(rid, effectiveCid)]);
-      const roles = store.resolvedRoles.get(roomKey);
+      
+      let roles = store.resolvedRoles.get(roomKey);
+
+      // Fallback: Restore roles from Redis if memory is empty
+      if ((!roles || roles.size === 0) && (room.phase >= 3 && room.phase <= 5)) {
+        try {
+          const { getRedis } = await import('../redis.js');
+          const redis = getRedis();
+          if (redis) {
+            const pattern = `gm:room:${effectiveCid}:${req.params.roomId}:role:*`;
+            const keys = await redis.keys(pattern);
+            if (keys.length > 0) {
+              const vals = await redis.mget(keys);
+              const restoredRoles = new Map<string, Role>();
+              for (let i = 0; i < keys.length; i++) {
+                if (vals[i]) {
+                   const addr = keys[i].split(':')[5];
+                   restoredRoles.set(addr, Number(vals[i]) as Role);
+                }
+              }
+              if (restoredRoles.size > 0) {
+                 store.resolvedRoles.set(roomKey, restoredRoles);
+                 roles = restoredRoles;
+                 logger.info({ roomId: req.params.roomId, count: restoredRoles.size }, '[win-check] Restored roles from Redis');
+              }
+            }
+          }
+        } catch (err: any) {
+          logger.error({ err: err.message, roomId: req.params.roomId }, '[win-check] Failed to fallback read roles from Redis');
+        }
+      }
+
       if (room.phase < 3 || room.phase > 5) return res.json({ winDetected: false, message: "Game not active" });
-      if (!roles) return res.json({ winDetected: false });
+      if (!roles || roles.size === 0) return res.json({ winDetected: false });
 
       let mafiaCount = 0, townCount = 0;
       for (const p of players) {

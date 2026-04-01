@@ -147,6 +147,9 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
         return res.status(202).json({ pending: true, message: 'Retry shortly' });
       }
 
+      const { rPersistRole } = await import('../redis.js');
+      if (redis) rPersistRole(redis, Number(chainId), String(roomId), String(playerAddress).toLowerCase(), role);
+
       const encrypted = eciesEncrypt(pubkey, String(role)); // encode as string for ECIES
       return res.json({ encrypted, roleId: role });
     } catch (err: any) {
