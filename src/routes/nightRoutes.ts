@@ -29,12 +29,19 @@ function clearNightTimer(roomKey: string): void {
 }
 
 export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): Promise<void> {
-  const state = getNightState(rid);
-  if (!state || state.resolved) return;
+  const roomIdStr = String(rid);
+  let state = getNightState(rid);
+  logger.info({ roomId: roomIdStr, hasState: !!state, isResolved: state?.resolved }, '[doResolveNight] Attempting to resolve night');
+  if (!state) {
+    state = getOrCreateNightState(rid, Number(chainId));
+  }
+  if (state.resolved) {
+      logger.info({ roomId: roomIdStr }, '[doResolveNight] State already resolved, aborting');
+      return;
+  }
   const effectiveChainId = Number(chainId || state.chainId);
 
   state.resolved = true;
-  const roomIdStr = String(rid);
   const roomKey = store.getRoomKey(effectiveChainId, roomIdStr);
   const { rPersistNightState, rDeleteNightState } = await import('../redis.js');
   if (redis) rPersistNightState(redis, effectiveChainId, roomIdStr, state);
@@ -91,8 +98,8 @@ export function scheduleNightTimeout(rid: bigint, store: GMStore, redis: RedisCl
   nightChainIds.set(roomKey, Number(chainId));
   const t = setTimeout(async () => {
     nightTimers.delete(roomKey);
-    const s = getNightState(rid);
-    if (!s || s.resolved) return;
+    const s = getNightState(rid) || getOrCreateNightState(rid, Number(chainId));
+    if (s.resolved) return;
     logger.info({ roomId: String(rid), chainId }, '[NightTimeout] Night resolution timeout reached');
     doResolveNight(rid, store, redis, chainId).catch((err) => {
       logger.error({ roomId: String(rid), err }, '[NightTimeout] Auto-resolve failed');
