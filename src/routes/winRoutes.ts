@@ -79,6 +79,7 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       const roomKey = store.getRoomKey(effectiveCid, req.params.roomId);
       const [room, players] = await Promise.all([getRoom(rid, effectiveCid), getPlayers(rid, effectiveCid)]);
       const roles = store.resolvedRoles.get(roomKey);
+      if (room.phase < 3 || room.phase > 5) return res.json({ winDetected: false, message: "Game not active" });
       if (!roles) return res.json({ winDetected: false });
 
       let mafiaCount = 0, townCount = 0;
