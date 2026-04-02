@@ -561,12 +561,13 @@ export class ServerStore {
 }
 
 /**
- * Game Log Entry structure
+ * Game Log Entry structure.
+ * Types match client LogEntry.type to ensure correct styling on the frontend.
  */
 export interface GameLogEntry {
     id: string;
     message: string;
-    type: 'info' | 'success' | 'danger' | 'warning';
+    type: 'info' | 'success' | 'danger' | 'warning' | 'phase' | 'night';
     timestamp: number;
     eventType?: string;
     eventData?: any;
