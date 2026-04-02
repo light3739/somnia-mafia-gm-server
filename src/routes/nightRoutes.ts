@@ -74,8 +74,16 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
     logger.warn({ roomId: roomIdStr, err: err.message }, '[doResolveNight] Player/Role fetch failed during resolve');
   }
 
-  const killTarget = calculateMafiaConsensus(allActions, totalAliveMafia);
+  let killTarget = calculateMafiaConsensus(allActions, totalAliveMafia);
   const healTarget = getDoctorHeal(allActions);
+
+  if (
+    killTarget.toLowerCase() === healTarget.toLowerCase() &&
+    killTarget !== '0x0000000000000000000000000000000000000000'
+  ) {
+    logger.info({ roomId: roomIdStr, saved: killTarget }, '[doResolveNight] Doctor successfully healed the mafia target!');
+    killTarget = '0x0000000000000000000000000000000000000000';
+  }
 
   logger.info({
     roomId: roomIdStr,
