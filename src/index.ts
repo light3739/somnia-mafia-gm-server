@@ -19,6 +19,8 @@ import { createWinRoutes } from './routes/winRoutes.js';
 import { createDiscussionRoutes } from './routes/discussionRoutes.js';
 import { createSessionRoutes } from './routes/sessionRoutes.js';
 import { createAvatarRoutes } from './routes/avatarRoutes.js';
+import { createLogRoutes } from './routes/logRoutes.js';
+import { LogListener } from './services/logListener.js';
 
 import { logger } from './utils/logger.js';
 
@@ -69,6 +71,7 @@ app.use(createWinRoutes(routesCtx as any));
 app.use(createDiscussionRoutes(routesCtx as any));
 app.use(createSessionRoutes(routesCtx as any));
 app.use(createAvatarRoutes(routesCtx as any));
+app.use(createLogRoutes(routesCtx as any));
 
 // Lifecycle
 async function start() {
@@ -82,6 +85,9 @@ async function start() {
   } else {
     logger.warn('[main] Redis not available, starting with empty memory.');
   }
+
+  // Start background log listener
+  LogListener.start();
 
   app.listen(port, () => {
     logger.info(`[main] GM Server listening on port ${port}`);

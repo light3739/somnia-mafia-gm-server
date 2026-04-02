@@ -485,7 +485,7 @@ export class ServerStore {
     }
 
     /**
-     * Get a single player's ECIES public key.
+     * Get all ECIES public key.
      */
     static async getEciesPubKey(roomId: string, address: string, chainId?: number | string): Promise<string | null> {
         const normalizedRoomId = BigInt(roomId).toString();
@@ -504,6 +504,72 @@ export class ServerStore {
             return null;
         }
     }
+
+    // ============ GAME LOGS ============
+
+    /**
+     * Get all logs for a room.
+     */
+    static async getGameLogs(roomId: string, chainId?: number | string): Promise<GameLogEntry[]> {
+        const normalizedRoomId = BigInt(roomId).toString();
+        const cid = chainId || '43113';
+        const key = `room:logs:${cid}:${normalizedRoomId}`;
+
+        if (!redis) {
+            const data = memoryStore[key];
+            if (!data || !data['list']) return [];
+            return JSON.parse(data['list']);
+        }
+
+        try {
+            const data = await redis.get(key);
+            if (!data) return [];
+            return JSON.parse(data);
+        } catch (e) {
+            logger.error({ err: e }, "[ServerStore] Redis error (getGameLogs)");
+            return [];
+        }
+    }
+
+    /**
+     * Add a log entry for a room.
+     */
+    static async addGameLog(roomId: string, log: GameLogEntry, chainId?: number | string) {
+        const normalizedRoomId = BigInt(roomId).toString();
+        const cid = chainId || '43113';
+        const key = `room:logs:${cid}:${normalizedRoomId}`;
+
+        const logs = await this.getGameLogs(roomId, chainId);
+        
+        // Prevent duplicate logs (especially from event re-polls)
+        if (logs.some(l => l.id === log.id)) return;
+        
+        logs.push(log);
+
+        if (!redis) {
+            if (!memoryStore[key]) memoryStore[key] = {};
+            memoryStore[key]['list'] = JSON.stringify(logs);
+            return;
+        }
+
+        try {
+            await redis.set(key, JSON.stringify(logs), 'EX', GAME_DATA_TTL);
+        } catch (e) {
+            logger.error({ err: e }, "[ServerStore] Redis error (addGameLog)");
+        }
+    }
+}
+
+/**
+ * Game Log Entry structure
+ */
+export interface GameLogEntry {
+    id: string;
+    message: string;
+    type: 'info' | 'success' | 'danger' | 'warning';
+    timestamp: number;
+    eventType?: string;
+    eventData?: any;
 }
 
 /**
