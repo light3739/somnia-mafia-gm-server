@@ -33,7 +33,8 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
   let state = getNightState(rid);
   logger.info({ roomId: roomIdStr, hasState: !!state, isResolved: state?.resolved }, '[doResolveNight] Attempting to resolve night');
   if (!state) {
-    state = getOrCreateNightState(rid, Number(chainId));
+    logger.info({ roomId: roomIdStr }, '[doResolveNight] No active state, aborting duplicate resolve');
+    return;
   }
   if (state.resolved) {
       logger.info({ roomId: roomIdStr }, '[doResolveNight] State already resolved, aborting');
