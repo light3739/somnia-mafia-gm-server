@@ -31,16 +31,28 @@ function clearNightTimer(roomKey: string): void {
 export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): Promise<void> {
   const roomIdStr = String(rid);
   let state = getNightState(rid);
+  const effectiveChainId = Number(chainId) || 43113;
+
   logger.info({ roomId: roomIdStr, hasState: !!state, isResolved: state?.resolved }, '[doResolveNight] Attempting to resolve night');
+  
   if (!state) {
-    state = getOrCreateNightState(rid, Number(chainId));
+    // RACE CONDITION & EMPTY NIGHT PROTECTOR
+    // If state is missing, could be a peaceful night (0 actions) OR a duplicate call just after `clearNightState`.
+    const { getRoom } = await import('../chain.js');
+    const roomInfo = await getRoom(rid, effectiveChainId);
+    if (Number(roomInfo.phase) !== 5) { // 5 = NIGHT phase
+      logger.info({ roomId: roomIdStr, phase: Number(roomInfo.phase) }, '[doResolveNight] No active state and not in Night phase on-chain, aborting duplicate resolve');
+      return;
+    }
+    // It is Night, but no actions were taken. We must create an empty state and resolve.
+    state = getOrCreateNightState(rid, effectiveChainId);
   }
+
   if (state.resolved) {
       logger.info({ roomId: roomIdStr }, '[doResolveNight] State already resolved, aborting');
       return;
   }
-  const effectiveChainId = Number(chainId || state.chainId);
-
+  
   state.resolved = true;
   const roomKey = store.getRoomKey(effectiveChainId, roomIdStr);
   const { rPersistNightState, rDeleteNightState } = await import('../redis.js');

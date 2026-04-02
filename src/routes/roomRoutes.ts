@@ -104,11 +104,8 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
       const providedHash = keccak256(toBytes(password));
       if (providedHash !== storedHash) return res.status(403).json({ error: 'Wrong password' });
 
-      const room = await getRoom(BigInt(roomId), chainId);
-      if (room?.tournamentId && room.tournamentId > 0n) {
-        const isPart = await isTournamentParticipant(room.tournamentId, playerAddress as Address, chainId);
-        if (!isPart) return res.status(403).json({ error: 'Join tournament first' });
-      }
+      // We do not check `isTournamentParticipant` here because the player might use `joinTournamentAndRoom` 
+      // atomically, meaning they aren't a participant yet but need the permit to submit the tx.
 
       const gmSignature = await signJoinPermit(BigInt(roomId), playerAddress as `0x${string}`, chainId ? Number(chainId) : avalancheFuji.id);
       logger.info({ roomId, player: playerAddress, chainId }, '[request-join] Join permit granted');
@@ -134,6 +131,8 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
           maxPlayers: room.maxPlayers,
           playersCount: room.playersCount,
           dayCount: room.dayCount,
+          isPrivate: room.isPrivate,
+          tournamentId: room.tournamentId ? String(room.tournamentId) : '0',
         },
         players: players.map((p: any) => ({
           wallet: p.wallet,
