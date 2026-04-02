@@ -540,10 +540,10 @@ export class ServerStore {
         const key = `room:logs:${cid}:${normalizedRoomId}`;
 
         const logs = await this.getGameLogs(roomId, chainId);
-        
+
         // Prevent duplicate logs (especially from event re-polls)
         if (logs.some(l => l.id === log.id)) return;
-        
+
         logs.push(log);
 
         if (!redis) {

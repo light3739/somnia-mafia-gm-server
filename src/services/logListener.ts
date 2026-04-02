@@ -113,8 +113,8 @@ export class LogListener {
         break;
 
       case 'DayStarted':
+        type = 'phase';
         message = `Day ${args.dayNumber} has begun.`;
-        type = 'phase'  as any;
         eventData = { dayNumber: Number(args.dayNumber) };
         break;
 
@@ -137,40 +137,38 @@ export class LogListener {
       case 'VotingFinalized':
         if (args.eliminated === '0x0000000000000000000000000000000000000000') {
           message = `Voting Finalized: No one was eliminated.`;
-          eventData = { isSafe: true };
           type = 'warning';
+          eventData = { isSafe: true };
         } else {
           const elimName = resolveNickname(chainId, roomId, args.eliminated);
           message = `Voting Finalized: ${elimName} was eliminated!`;
-          eventData = { isEliminated: true, playerName: elimName, playerAddress: args.eliminated };
           type = 'danger';
+          eventData = { isEliminated: true, playerName: elimName };
         }
         eventType = 'VOTING_RESULT';
         break;
 
       case 'NightStarted':
+        type = 'night';
         message = `Night has fallen...`;
-        type = 'night' as any;
         eventType = 'NIGHT_FALLS';
         break;
 
       case 'NightFinalized':
         if (!args.killed || args.killed === '0x0000000000000000000000000000000000000000') {
           message = `Night Result: No one died last night.`;
-          eventData = { isSafe: true };
           type = 'success';
+          eventData = { isSafe: true };
         } else {
           const killedName = resolveNickname(chainId, roomId, args.killed);
-          const healedAddr = args.healed ? (args.healed as string).toLowerCase() : '0x00';
-          const killedAddr = (args.killed as string).toLowerCase();
-          if (killedAddr === healedAddr) {
+          if (args.killed === args.healed) {
             message = `Night Result: No one died last night.`;
-            eventData = { isSafe: true };
             type = 'success';
+            eventData = { isSafe: true };
           } else {
             message = `Night Result: ${killedName} was killed by Mafia!`;
-            eventData = { isEliminated: true, playerName: killedName, playerAddress: args.killed };
             type = 'danger';
+            eventData = { isEliminated: true, playerName: killedName };
           }
         }
         eventType = 'NIGHT_RESULT';
