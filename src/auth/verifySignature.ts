@@ -101,7 +101,7 @@ export function createAuthService(ctx: AuthContext) {
     // 3. Session key resolution (Signer vs Player)
     if (normalizedSigner !== normalizedPlayer) {
       const requestedRoomIdBI = BigInt(roomId);
-      const effectiveChainId = Number(chainId || 43113);
+      const effectiveChainId = Number(chainId || 50312);
       const cacheKey = `${effectiveChainId}:${normalizedPlayer}`;
 
       // a) Check local cache

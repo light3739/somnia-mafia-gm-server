@@ -8,7 +8,7 @@ export class SignatureBuilder {
    * Enforces the standard base format: action:chainId:roomId
    */
   constructor(action: string, chainId: number | string | undefined, roomId: number | string) {
-    const cid = String(chainId || 43113);
+    const cid = String(chainId || 50312);
     const rid = String(roomId);
     this.base = `${action}:${cid}:${rid}`;
   }

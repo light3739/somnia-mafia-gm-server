@@ -86,7 +86,7 @@ export class ServerStore {
         this.ensureSecureStorageForCriticalPath(isDiscussion ? 'consumeReplayNonce:Discussion' : 'consumeReplayNonce');
 
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `replay:${scope}:${cid}:${normalizedRoomId}:${actorAddress.toLowerCase()}:${nonce}`;
 
         if (!redis) {
@@ -124,7 +124,7 @@ export class ServerStore {
         this.ensureSecureStorageForCriticalPath('storeSecret');
 
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const secret: PlayerSecret = { role, salt, commitment };
         const key = `room:secrets:${cid}:${normalizedRoomId}`;
         const normalizedAddress = address.toLowerCase();
@@ -178,7 +178,7 @@ export class ServerStore {
         this.ensureSecureStorageForCriticalPath('getRoomSecrets');
 
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:secrets:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
@@ -213,7 +213,7 @@ export class ServerStore {
      */
     static async clearRoom(roomId: string, chainId?: number | string) {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:secrets:${cid}:${normalizedRoomId}`;
         if (!redis) {
             delete memoryStore[key];
@@ -234,7 +234,7 @@ export class ServerStore {
      */
     static async getDiscussionState(roomId: string, dayCount: number, chainId?: number | string): Promise<DiscussionState | null> {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:discussion:${cid}:${normalizedRoomId}:${dayCount}`;
 
         const fallback = () => {
@@ -262,7 +262,7 @@ export class ServerStore {
      */
     static async setDiscussionState(roomId: string, dayCount: number, state: DiscussionState, chainId?: number | string) {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:discussion:${cid}:${normalizedRoomId}:${dayCount}`;
 
         const fallback = () => {
@@ -346,7 +346,7 @@ export class ServerStore {
      */
     static async clearDiscussionState(roomId: string, dayCount: number, chainId?: number | string) {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:discussion:${cid}:${normalizedRoomId}:${dayCount}`;
 
         if (!redis) {
@@ -368,7 +368,7 @@ export class ServerStore {
      */
     static async storeAvatar(roomId: string, address: string, base64Avatar: string, chainId?: number | string) {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:avatars:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
@@ -393,7 +393,7 @@ export class ServerStore {
      */
     static async getAvatars(roomId: string, chainId?: number | string): Promise<Record<string, string>> {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:avatars:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
@@ -414,7 +414,7 @@ export class ServerStore {
      */
     static async getAvatar(roomId: string, address: string, chainId?: number | string): Promise<string | null> {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:avatars:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
@@ -437,7 +437,7 @@ export class ServerStore {
      */
     static async storeEciesPubKey(roomId: string, address: string, pubKeyHex: string, chainId?: number | string): Promise<void> {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:ecies_pubkeys:${cid}:${normalizedRoomId}`;
         const normalizedAddress = address.toLowerCase();
 
@@ -468,7 +468,7 @@ export class ServerStore {
      */
     static async getEciesPubKeys(roomId: string, chainId?: number | string): Promise<Record<string, string>> {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:ecies_pubkeys:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
@@ -489,7 +489,7 @@ export class ServerStore {
      */
     static async getEciesPubKey(roomId: string, address: string, chainId?: number | string): Promise<string | null> {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:ecies_pubkeys:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
@@ -512,7 +512,7 @@ export class ServerStore {
      */
     static async getGameLogs(roomId: string, chainId?: number | string): Promise<GameLogEntry[]> {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:logs:${cid}:${normalizedRoomId}`;
 
         if (!redis) {
@@ -536,7 +536,7 @@ export class ServerStore {
      */
     static async addGameLog(roomId: string, log: GameLogEntry, chainId?: number | string) {
         const normalizedRoomId = BigInt(roomId).toString();
-        const cid = chainId || '43113';
+        const cid = chainId || '50312';
         const key = `room:logs:${cid}:${normalizedRoomId}`;
 
         const logs = await this.getGameLogs(roomId, chainId);

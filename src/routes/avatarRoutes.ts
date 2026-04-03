@@ -26,7 +26,7 @@ export function createAvatarRoutes(ctx: AvatarRoutesContext) {
     try {
       const { roomId } = req.params;
       const { chainId } = req.query;
-      const avatars = await ServerStore.getAvatars(String(roomId), String(chainId || 43113));
+      const avatars = await ServerStore.getAvatars(String(roomId), String(chainId || 50312));
       return res.json({ avatars });
     } catch (err: any) {
       logger.error({ err, roomId: req.params.roomId }, '[getAvatars] Failed');
@@ -58,7 +58,7 @@ export function createAvatarRoutes(ctx: AvatarRoutesContext) {
         return res.status(400).json({ error: 'Invalid avatar format' });
       }
 
-      await ServerStore.storeAvatar(String(roomId), String(address), String(avatar), String(chainId || 43113));
+      await ServerStore.storeAvatar(String(roomId), String(address), String(avatar), String(chainId || 50312));
       logger.info({ roomId, player: address, chainId }, '[storeAvatar] Avatar updated');
       return res.json({ success: true });
     } catch (err: any) {

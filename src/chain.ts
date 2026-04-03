@@ -60,7 +60,7 @@ const chainsConfig: Record<number, ChainConfig> = {
 };
 
 export function getChainConfig(chainId?: number): ChainConfig {
-  return chainsConfig[Number(chainId)] || chainsConfig[avalancheFuji.id];
+  return chainsConfig[Number(chainId)] || chainsConfig[somniaTestnet.id];
 }
 
 // ─── Contract Helpers ─────────────────────────────────────
@@ -155,7 +155,7 @@ export async function resolveNight(roomId: bigint, killTarget: Address, healTarg
 }
 
 export async function assertChainConfigOrThrow() {
-  for (const cid of [avalancheFuji.id, somniaTestnet.id]) {
+  for (const cid of [somniaTestnet.id]) {
     const { public: client } = getChainConfig(cid);
     try {
       const rpcChainId = await client.getChainId();

@@ -3,7 +3,7 @@
  */
 import { Router } from 'express';
 import { keccak256, toBytes, type Address } from 'viem';
-import { getRoom, getPlayers, signJoinPermit, getTournament, isTournamentParticipant, avalancheFuji, FLAGS } from '../chain.js';
+import { getRoom, getPlayers, signJoinPermit, getTournament, isTournamentParticipant, somniaTestnet, FLAGS } from '../chain.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
@@ -26,7 +26,7 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
   const { store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter } = ctx;
 
   const getPasswordKey = (chainId: number | undefined, roomId: string) =>
-    `room:password:${chainId || avalancheFuji.id}:${roomId}`;
+    `room:password:${chainId || somniaTestnet.id}:${roomId}`;
 
   // ── Set Room Password ─────────────────────────────────────
   router.post('/room-password', actionLimiter, async (req, res) => {
@@ -107,7 +107,7 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
       // We do not check `isTournamentParticipant` here because the player might use `joinTournamentAndRoom` 
       // atomically, meaning they aren't a participant yet but need the permit to submit the tx.
 
-      const gmSignature = await signJoinPermit(BigInt(roomId), playerAddress as `0x${string}`, chainId ? Number(chainId) : avalancheFuji.id);
+      const gmSignature = await signJoinPermit(BigInt(roomId), playerAddress as `0x${string}`, chainId ? Number(chainId) : somniaTestnet.id);
       logger.info({ roomId, player: playerAddress, chainId }, '[request-join] Join permit granted');
       return res.json({ success: true, gmSignature });
     } catch (err: any) {

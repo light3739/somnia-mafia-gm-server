@@ -52,12 +52,12 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
 
       if (!roomId) return res.status(400).json({ error: 'Missing roomId' });
 
-      let state = await ServerStore.getDiscussionState(String(roomId), Number(dayCount || 1), Number(chainId || 43113));
+      let state = await ServerStore.getDiscussionState(String(roomId), Number(dayCount || 1), Number(chainId || 50312));
       if (!state) return res.json({ active: false, message: 'Discussion not started' });
 
       // Get alive players
       const rid = BigInt(String(roomId));
-      const players = await getPlayers(rid, Number(chainId || 43113));
+      const players = await getPlayers(rid, Number(chainId || 50312));
       const allShuffled = shufflePlayers(players, String(roomId));
       const alivePlayers = allShuffled.filter((p: any) => (Number(p.flags) & FLAGS.ACTIVE) !== 0);
       const totalSpeakers = alivePlayers.length;
@@ -67,14 +67,14 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
         if (state.phase === 'speaking') {
           const elapsed = (Date.now() - state.speakerStartTime) / 1000;
           if (elapsed >= state.speakerDuration) {
-            const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, false, Number(chainId || 43113));
+            const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, false, Number(chainId || 50312));
             if (newState) state = newState;
           }
         } else if (state.phase === 'initial_delay') {
           const delayElapsed = (Date.now() - (state.delayStartTime || 0)) / 1000;
           const delayDuration = state.delayDuration || 5;
           if (delayElapsed >= delayDuration) {
-            const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, false, Number(chainId || 43113));
+            const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, false, Number(chainId || 50312));
             if (newState) state = newState;
           }
         }
@@ -135,13 +135,13 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
 
       // Get alive players
       const rid = BigInt(String(roomId));
-      const players = await getPlayers(rid, Number(chainId || 43113));
+      const players = await getPlayers(rid, Number(chainId || 50312));
       const allShuffled = shufflePlayers(players, String(roomId));
       const alivePlayers = allShuffled.filter((p: any) => (Number(p.flags) & FLAGS.ACTIVE) !== 0);
       const totalSpeakers = alivePlayers.length;
 
       if (reqAction === 'start') {
-        const existingState = await ServerStore.getDiscussionState(String(roomId), Number(dayCount || 1), Number(chainId || 43113));
+        const existingState = await ServerStore.getDiscussionState(String(roomId), Number(dayCount || 1), Number(chainId || 50312));
         if (existingState && !existingState.finished) {
           return res.json({ ok: true, message: 'Already started' });
         }
@@ -155,13 +155,13 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
           delayStartTime: Date.now(),
           delayDuration: 5
         };
-        await ServerStore.setDiscussionState(String(roomId), Number(dayCount || 1), newState, Number(chainId || 43113));
+        await ServerStore.setDiscussionState(String(roomId), Number(dayCount || 1), newState, Number(chainId || 50312));
         logger.info({ roomId, dayCount, chainId }, '[discussion] Discussion started');
         return res.json({ ok: true });
       }
 
       if (reqAction === 'skip') {
-        const state = await ServerStore.getDiscussionState(String(roomId), Number(dayCount || 1), Number(chainId || 43113));
+        const state = await ServerStore.getDiscussionState(String(roomId), Number(dayCount || 1), Number(chainId || 50312));
         if (!state || state.finished) return res.status(400).json({ error: 'Not active' });
 
         // Verify it's current speaker or host
@@ -174,7 +174,7 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
              // For now, only speaker can skip local or host must sign
         }
 
-        const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, true, Number(chainId || 43113));
+        const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, true, Number(chainId || 50312));
         logger.info({ roomId, dayCount, skippedBy: playerAddress, nextIndex: newState?.currentSpeakerIndex }, '[discussion] Speaker skipped');
         return res.json({ ok: true, newState });
       }

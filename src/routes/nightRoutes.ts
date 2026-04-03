@@ -31,7 +31,7 @@ function clearNightTimer(roomKey: string): void {
 export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): Promise<void> {
   const roomIdStr = String(rid);
   let state = getNightState(rid);
-  const effectiveChainId = Number(chainId) || 43113;
+  const effectiveChainId = Number(chainId) || 50312;
 
   logger.info({ roomId: roomIdStr, hasState: !!state, isResolved: state?.resolved }, '[doResolveNight] Attempting to resolve night');
   
@@ -113,7 +113,7 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
 }
 
 export function scheduleNightTimeout(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): void {
-  const roomKey = store.getRoomKey(Number(chainId || 43113), String(rid));
+  const roomKey = store.getRoomKey(Number(chainId || 50312), String(rid));
   clearNightTimer(roomKey);
   nightChainIds.set(roomKey, Number(chainId));
   const t = setTimeout(async () => {

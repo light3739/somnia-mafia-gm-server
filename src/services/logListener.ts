@@ -1,4 +1,4 @@
-import { DIAMOND_ABI, getChainConfig, avalancheFuji, somniaTestnet } from '../chain.js';
+import { DIAMOND_ABI, getChainConfig, somniaTestnet } from '../chain.js';
 import { ServerStore, type GameLogEntry } from './serverStore.js';
 import { logger } from '../utils/logger.js';
 
@@ -50,7 +50,7 @@ export class LogListener {
   private static activeListeners: Map<number, any> = new Map();
 
   static start() {
-    this.listenOnChain(avalancheFuji.id);
+    this.listenOnChain(somniaTestnet.id);
     this.listenOnChain(somniaTestnet.id);
   }
 

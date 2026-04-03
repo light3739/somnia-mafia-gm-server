@@ -62,7 +62,7 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
           store.sessionCache.set(cacheKey, {
             sessionAddress: normalizedSession,
             roomId: roomKeyStr,
-            chainId: Number(cidStr || data.chainId || 43113),
+            chainId: Number(cidStr || data.chainId || 50312),
           });
         }
       }
@@ -76,7 +76,7 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
     (async () => {
       try {
         const [cidStr, ridInKeyStr] = roomId.split(':');
-        const cidNum = Number(cidStr || 43113);
+        const cidNum = Number(cidStr || 50312);
         const rid = BigInt(ridInKeyStr);
 
         const players = await getPlayers(rid, cidNum) as any[];

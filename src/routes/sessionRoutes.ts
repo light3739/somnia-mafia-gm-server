@@ -44,7 +44,7 @@ export function createSessionRoutes(ctx: SessionRoutesContext) {
       const normalizedMain = mainWallet.toLowerCase();
       const normalizedSession = sessionAddress.toLowerCase();
       const roomIdStr = String(roomId);
-      const cidStr = String(chainId || 43113);
+      const cidStr = String(chainId || 50312);
       
       const message = new SignatureBuilder('register-session', cidStr, roomIdStr)
         .withAddress(normalizedMain)
