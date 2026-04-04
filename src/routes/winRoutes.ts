@@ -153,7 +153,7 @@ export function createWinRoutes(ctx: WinRoutesContext) {
         return {
           role: s?.role === 1 ? 1 : 0,
           salt: (alive && s) ? s.salt : "0".repeat(64),
-          commitment: (alive && s) ? s.commitment : "0",
+          commitment: (alive && s) ? s.commitment : "14744269619966411208579211824598458697587494354926760081771325075741142829156",
           isActive: alive ? 1 : 0,
         };
       });
