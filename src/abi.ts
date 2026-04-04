@@ -1734,9 +1734,9 @@ export const DIAMOND_ABI = [
         "type": "uint256[2]"
       },
       {
-        "internalType": "uint256[4]",
+        "internalType": "uint256[6]",
         "name": "input",
-        "type": "uint256[4]"
+        "type": "uint256[6]"
       }
     ],
     "name": "endGameZK",
