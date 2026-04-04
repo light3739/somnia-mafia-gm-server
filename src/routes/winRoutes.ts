@@ -148,7 +148,7 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       const players = await getPlayers(BigInt(roomId), cid);
       const zkInput = players.map((p: any) => {
         const addr = p.wallet.toLowerCase();
-        let s = secrets[addr];
+        let s: any = secrets[addr];
         const alive = !!(Number(p.flags) & FLAGS.ACTIVE);
 
         // Smart contract generates hash using zero-commitment for dead players.
