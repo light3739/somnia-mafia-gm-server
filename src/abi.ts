@@ -580,6 +580,19 @@ export const DIAMOND_ABI = [
         "type": "uint256"
       }
     ],
+    "name": "forfeitGame",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
     "name": "getAllKeysForMe",
     "outputs": [
       {

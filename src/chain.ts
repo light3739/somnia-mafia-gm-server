@@ -38,7 +38,7 @@ export const GM_ADDRESS = gmAccount.address;
 logger.info(`[chain] GM Service initialized with address: ${GM_ADDRESS}`);
 
 const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x9f11a8c79d9c59071b4f64f40b0a35cb56645149') as Address;
-const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0xe5437f7857cf7abe40de67e8f462b87f9c8eecc8') as Address;
+const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0x0406a14729b0c77c187ac5229c8c2317589e73c0') as Address;
 
 interface ChainConfig {
   public: any; // using any here to simplify client types, will be narrowed by readContract
