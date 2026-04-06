@@ -53,10 +53,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate Limiting
-const pollLimiter = rateLimit({ windowMs: 1000, max: 20, message: { error: 'Too many requests' } });
-const actionLimiter = rateLimit({ windowMs: 1000, max: 10, message: { error: 'Action rate limit exceeded' } });
-const heavyLimiter = rateLimit({ windowMs: 20000, max: 15, message: { error: 'Heavy action rate limit exceeded' } });
+// Ensure preflight (OPTIONS) requests always pass through with CORS headers — never rate-limited
+app.options('*', cors());
+
+// Rate Limiting (skip OPTIONS to prevent CORS errors on 429 responses)
+const skipOptions = (req: express.Request) => req.method === 'OPTIONS';
+const pollLimiter = rateLimit({ windowMs: 1000, max: 20, skip: skipOptions, message: { error: 'Too many requests' } });
+const actionLimiter = rateLimit({ windowMs: 1000, max: 15, skip: skipOptions, message: { error: 'Action rate limit exceeded' } });
+const heavyLimiter = rateLimit({ windowMs: 20000, max: 15, skip: skipOptions, message: { error: 'Heavy action rate limit exceeded' } });
 
 // Health Check
 app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
