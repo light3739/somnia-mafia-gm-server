@@ -106,6 +106,22 @@ jobs:
             fi
           "
 
+      - name: Health check
+        run: |
+          echo "🏥 Checking https://gm.mafiaonchain.live/health..."
+          sleep 15
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://gm.mafiaonchain.live/health" || true)
+            if [ "$STATUS" = "200" ]; then
+              echo "✅ Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "⏳ Attempt $i: status=$STATUS, retrying in 10s..."
+            sleep 10
+          done
+          echo "❌ Health check failed after 5 attempts"
+          exit 1
+
       - name: Notify success (Telegram)
         if: success()
         run: |
