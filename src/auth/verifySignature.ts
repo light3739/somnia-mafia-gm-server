@@ -131,8 +131,10 @@ export function createAuthService(ctx: AuthContext) {
           const sessionAddress = String(session.sessionAddress || '').toLowerCase();
           const isActive = Boolean(session.isActive);
           const sessionRoomIdBI = BigInt(session.roomId || 0n);
+          const expiresAt = Number(session.expiresAt || 0);
+          const isExpired = expiresAt > 0 && expiresAt < Math.floor(Date.now() / 1000);
 
-          if (sessionAddress === normalizedSigner && isActive && sessionRoomIdBI === requestedRoomIdBI) {
+          if (sessionAddress === normalizedSigner && isActive && !isExpired && sessionRoomIdBI === requestedRoomIdBI) {
             store.sessionCache.set(cacheKey, { sessionAddress: normalizedSigner, roomId: String(requestedRoomIdBI), chainId: effectiveChainId });
             return { ok: true, signer: normalizedSigner };
           }
