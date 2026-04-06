@@ -1758,6 +1758,47 @@ export const DIAMOND_ABI = [
     "type": "function"
   },
   {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "internalType": "address[]",
+        "name": "players",
+        "type": "address[]"
+      },
+      {
+        "internalType": "uint8[]",
+        "name": "mappedRoles",
+        "type": "uint8[]"
+      },
+      {
+        "internalType": "bytes32[]",
+        "name": "salts",
+        "type": "bytes32[]"
+      }
+    ],
+    "name": "revealRoles",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "RolesRevealed",
+    "type": "event"
+  },
+  {
     "inputs": [],
     "name": "AlreadyClaimed",
     "type": "error"

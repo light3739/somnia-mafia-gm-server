@@ -2,10 +2,11 @@
  * routes/winRoutes.ts
  */
 import { Router } from 'express';
-import { getRoom, getPlayers, FLAGS } from '../chain.js';
+import { getRoom, getPlayers, FLAGS, revealRolesOnChain } from '../chain.js';
 import { Role } from '../types/contract.js';
 import type { GMStore } from '../stores/index.js';
 import { ServerStore } from '../services/serverStore.js';
+import type { Address, Hex } from 'viem';
 import { generateEndGameProof, calculatePoseidon } from '../zk.js';
 import { Mutex } from 'async-mutex';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
@@ -176,6 +177,70 @@ export function createWinRoutes(ctx: WinRoutesContext) {
     } catch (err: any) {
       logger.error({ err: err.message, roomId }, '[end-game-zk] ZK proof generation failed');
       return res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /reveal-roles/:roomId
+   * GM reveals all player roles on-chain so distributeMafiaPrizes can determine winners.
+   * Called by frontend after endGameZK succeeds and before distributeMafiaPrizes.
+   */
+  router.post('/reveal-roles/:roomId', heavyLimiter, async (req, res) => {
+    const roomId = req.params.roomId;
+    try {
+      const cid = req.body.chainId;
+      const effectiveCid = cid || 50312;
+
+      const [secrets, players, room] = await Promise.all([
+        ServerStore.getRoomSecrets(roomId, effectiveCid),
+        getPlayers(BigInt(roomId), effectiveCid),
+        getRoom(BigInt(roomId), effectiveCid),
+      ]);
+
+      if (room.phase !== 6) { // GamePhase.ENDED
+        return res.status(400).json({ error: `Room not in ENDED phase (current: ${room.phase})` });
+      }
+
+      if (!secrets || Object.keys(secrets).length === 0) {
+        return res.status(400).json({ error: 'No secrets found for this room' });
+      }
+
+      const playerAddresses: Address[] = [];
+      const mappedRoles: number[] = [];
+      const salts: Hex[] = [];
+
+      for (const p of players) {
+        const addr = p.wallet.toLowerCase();
+        const s = secrets[addr];
+
+        playerAddresses.push(p.wallet as Address);
+
+        if (s) {
+          // Use real role+salt for ALL players (alive or dead) — their roleCommit is their original commit
+          mappedRoles.push(Number(s.role) === 1 ? 1 : 0);
+          const cleanSalt = String(s.salt).startsWith('0x') ? String(s.salt) : ('0x' + String(s.salt));
+          salts.push(cleanSalt as Hex);
+        } else {
+          logger.warn({ roomId, player: addr }, '[reveal-roles] No secret found for player');
+          return res.status(400).json({ error: `No secret found for player ${addr}` });
+        }
+      }
+
+      logger.info({ roomId, playerCount: playerAddresses.length }, '[reveal-roles] Submitting role reveal on-chain...');
+      const { hash } = await revealRolesOnChain(
+        BigInt(roomId),
+        playerAddresses,
+        mappedRoles,
+        salts,
+        effectiveCid,
+      );
+
+      logger.info({ roomId, hash }, '[reveal-roles] Roles revealed on-chain');
+      return res.json({ ok: true, hash });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error({ err: msg, roomId }, '[reveal-roles] Failed to reveal roles');
+      return res.status(500).json({ error: msg });
     }
   });
 

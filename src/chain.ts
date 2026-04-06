@@ -154,6 +154,37 @@ export async function resolveNight(roomId: bigint, killTarget: Address, healTarg
   return { hash, receipt };
 }
 
+export async function revealRolesOnChain(
+  roomId: bigint,
+  players: Address[],
+  mappedRoles: number[],
+  salts: Hex[],
+  chainId?: number
+) {
+  const { wallet: client, public: publicClient, diamond } = getChainConfig(chainId);
+  const hash = await client.writeContract({
+    address: diamond,
+    abi: DIAMOND_ABI,
+    functionName: 'revealRoles',
+    args: [roomId, players, mappedRoles, salts],
+    chain: null,
+  });
+  logger.info(`[chain] revealRoles tx: ${hash} for room ${roomId} on chainId ${chainId}`);
+
+  const receipt = await Promise.race([
+    publicClient.waitForTransactionReceipt({ hash }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('waitForTransactionReceipt timeout after 120s')), 120_000)
+    ),
+  ]);
+
+  logger.info(`[chain] revealRoles confirmed in block ${(receipt as any).blockNumber}, status: ${(receipt as any).status}`);
+  if ((receipt as any).status === 'reverted') {
+    throw new Error(`revealRoles reverted in block ${(receipt as any).blockNumber}`);
+  }
+  return { hash, receipt };
+}
+
 export async function assertChainConfigOrThrow() {
   for (const cid of [somniaTestnet.id]) {
     const { public: client } = getChainConfig(cid);
