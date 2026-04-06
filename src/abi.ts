@@ -1,8 +1,194 @@
 /**
  * 💎 Mafia Diamond Contract ABI
- * AUTO-GENERATED - DO NOT EDIT
+ * AUTO-GENERATED — do not edit by hand
+ * Run: cd SomniaSol && npx tsx scripts/sync-abi.ts
  */
 export const DIAMOND_ABI = [
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "_owner",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "inputs": [],
+    "name": "FacetCallFailed",
+    "type": "error"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes4",
+        "name": "selector",
+        "type": "bytes4"
+      }
+    ],
+    "name": "FunctionNotFound",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NotOwner",
+    "type": "error"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "facet",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "selectorCount",
+        "type": "uint256"
+      }
+    ],
+    "name": "FacetAdded",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "facet",
+        "type": "address"
+      }
+    ],
+    "name": "FacetRemoved",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "previousOwner",
+        "type": "address"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "OwnershipTransferred",
+    "type": "event"
+  },
+  {
+    "stateMutability": "payable",
+    "type": "fallback"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "facet",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes4[]",
+        "name": "selectors",
+        "type": "bytes4[]"
+      }
+    ],
+    "name": "addFacet",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes4[]",
+        "name": "selectors",
+        "type": "bytes4[]"
+      }
+    ],
+    "name": "removeSelectors",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newFacet",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes4[]",
+        "name": "selectors",
+        "type": "bytes4[]"
+      }
+    ],
+    "name": "replaceFacet",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes4",
+        "name": "",
+        "type": "bytes4"
+      }
+    ],
+    "name": "selectorToFacet",
+    "outputs": [
+      {
+        "internalType": "address",
+        "name": "",
+        "type": "address"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
+        "name": "newOwner",
+        "type": "address"
+      }
+    ],
+    "name": "transferOwnership",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "stateMutability": "payable",
+    "type": "receive"
+  },
   {
     "inputs": [],
     "name": "AlreadyJoined",
@@ -41,11 +227,6 @@ export const DIAMOND_ABI = [
   {
     "inputs": [],
     "name": "NotEnoughPlayers",
-    "type": "error"
-  },
-  {
-    "inputs": [],
-    "name": "NotOwner",
     "type": "error"
   },
   {
@@ -161,6 +342,31 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "DepositCollected",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "DepositRefunded",
     "type": "event"
   },
   {
@@ -315,6 +521,31 @@ export const DIAMOND_ABI = [
       {
         "indexed": false,
         "internalType": "string",
+        "name": "reason",
+        "type": "string"
+      }
+    ],
+    "name": "PlayerEliminated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "string",
         "name": "nickname",
         "type": "string"
       },
@@ -432,56 +663,6 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "VotingFinalized",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "voter",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "target",
-        "type": "address"
-      }
-    ],
-    "name": "VoteCast",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "string",
-        "name": "reason",
-        "type": "string"
-      }
-    ],
-    "name": "PlayerEliminated",
     "type": "event"
   },
   {
@@ -1091,6 +1272,19 @@ export const DIAMOND_ABI = [
     "inputs": [
       {
         "internalType": "address",
+        "name": "p",
+        "type": "address"
+      }
+    ],
+    "name": "setPoseidon2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "address",
         "name": "v",
         "type": "address"
       }
@@ -1614,6 +1808,31 @@ export const DIAMOND_ABI = [
     "type": "event"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "killed",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "healed",
+        "type": "address"
+      }
+    ],
+    "name": "NightResolvedByGM",
+    "type": "event"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1725,6 +1944,19 @@ export const DIAMOND_ABI = [
     "type": "function"
   },
   {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "roomId",
+        "type": "uint256"
+      }
+    ],
+    "name": "RolesRevealed",
+    "type": "event"
+  },
+  {
     "inputs": [
       {
         "internalType": "uint256",
@@ -1784,19 +2016,6 @@ export const DIAMOND_ABI = [
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "RolesRevealed",
-    "type": "event"
   },
   {
     "inputs": [],
