@@ -9,7 +9,9 @@ import { doResolveNight, nightChainIds } from '../routes/nightRoutes.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 
-const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 180_000);
+// 60s — keep in sync with nightRoutes.ts. Must be strictly LESS than on-chain
+// LibGame.NIGHT_TIMEOUT (90s).
+const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 60_000);
 
 export async function bootstrap(store: GMStore, redisClient: RedisClient): Promise<void> {
   if (!redisClient) return;

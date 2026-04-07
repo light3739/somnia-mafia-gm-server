@@ -1733,81 +1733,6 @@ export const DIAMOND_ABI = [
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "NotMafiaMember",
-    "type": "error"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "AllMafiaTargetsCommitted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes",
-        "name": "encryptedMessage",
-        "type": "bytes"
-      }
-    ],
-    "name": "MafiaMessageSent",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes32",
-        "name": "commitHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "MafiaTargetCommitted",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "target",
-        "type": "address"
-      }
-    ],
-    "name": "MafiaTargetRevealed",
-    "type": "event"
-  },
-  {
     "anonymous": false,
     "inputs": [
       {
@@ -1840,71 +1765,6 @@ export const DIAMOND_ABI = [
         "type": "uint256"
       },
       {
-        "internalType": "bytes32",
-        "name": "targetHash",
-        "type": "bytes32"
-      }
-    ],
-    "name": "commitMafiaTarget",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      }
-    ],
-    "name": "getMafiaConsensus",
-    "outputs": [
-      {
-        "internalType": "uint8",
-        "name": "committed",
-        "type": "uint8"
-      },
-      {
-        "internalType": "uint8",
-        "name": "revealed",
-        "type": "uint8"
-      },
-      {
-        "internalType": "address",
-        "name": "consensusTarget",
-        "type": "address"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "string",
-        "name": "encryptedMessage",
-        "type": "string"
-      }
-    ],
-    "name": "mafiaMessage",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
         "internalType": "address",
         "name": "victim",
         "type": "address"
@@ -1916,29 +1776,6 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "resolveNightAsGameMaster",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "roomId",
-        "type": "uint256"
-      },
-      {
-        "internalType": "address",
-        "name": "target",
-        "type": "address"
-      },
-      {
-        "internalType": "string",
-        "name": "salt",
-        "type": "string"
-      }
-    ],
-    "name": "revealMafiaTarget",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"

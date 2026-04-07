@@ -19,7 +19,9 @@ import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 import { logger } from '../utils/logger.js';
 
-const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 180_000);
+// 60s — must be strictly LESS than on-chain LibGame.NIGHT_TIMEOUT (90s) so GM has
+// time to land its resolveNightAsGameMaster tx before any player can call forcePhaseTimeout.
+const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 60_000);
 const nightTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export const nightChainIds = new Map<string, number | undefined>();
 
