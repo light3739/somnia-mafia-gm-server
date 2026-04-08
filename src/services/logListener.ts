@@ -155,6 +155,8 @@ export class LogListener {
         break;
 
       case 'NightFinalized':
+        // Failsafe peaceful path only — LibGame.finalizeNight always emits
+        // (0,0) here. Real mafia kills come through NightResolvedByGM below.
         if (!args.killed || args.killed === '0x0000000000000000000000000000000000000000') {
           message = `Night Result: No one died last night.`;
           type = 'success';
@@ -173,6 +175,28 @@ export class LogListener {
         }
         eventType = 'NIGHT_RESULT';
         break;
+
+      case 'NightResolvedByGM': {
+        // Real mafia kill path: NightFacet.resolveNightAsGameMaster emits this
+        // BEFORE transitionToDay when victim != 0. Previously no NIGHT_RESULT
+        // log was produced for kill nights — the morning recap on the next day
+        // stayed empty even though the player was clearly dead.
+        const killedAddr = args.killed as string | undefined;
+        if (!killedAddr || killedAddr === '0x0000000000000000000000000000000000000000') {
+          // Defensive: GM should not call this with victim==0, but if it does
+          // surface a peaceful result so we don't lose the log entry entirely.
+          message = `Night Result: No one died last night.`;
+          type = 'success';
+          eventData = { isSafe: true };
+        } else {
+          const killedName = resolveNickname(chainId, roomId, killedAddr);
+          message = `Night Result: ${killedName} was killed by Mafia!`;
+          type = 'danger';
+          eventData = { isEliminated: true, playerName: killedName };
+        }
+        eventType = 'NIGHT_RESULT';
+        break;
+      }
 
       case 'PlayerEliminated':
         // Only log non-night eliminations (night kills are covered by NightFinalized)
