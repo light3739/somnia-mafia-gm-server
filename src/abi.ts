@@ -1907,6 +1907,31 @@ export const DIAMOND_ABI = [
     "inputs": [
       {
         "indexed": true,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "address",
+        "name": "token",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "RefundQueued",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
         "internalType": "uint256",
         "name": "tournamentId",
         "type": "uint256"
@@ -1988,6 +2013,31 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "TournamentJoined",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      },
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "player",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "refund",
+        "type": "uint256"
+      }
+    ],
+    "name": "TournamentLeft",
     "type": "event"
   },
   {
@@ -2251,6 +2301,16 @@ export const DIAMOND_ABI = [
             "internalType": "address[]",
             "name": "participants",
             "type": "address[]"
+          },
+          {
+            "internalType": "uint8",
+            "name": "roomBoundCount",
+            "type": "uint8"
+          },
+          {
+            "internalType": "uint8",
+            "name": "distributedPlayerCount",
+            "type": "uint8"
           }
         ],
         "internalType": "struct MafiaTypes.Tournament",
@@ -2344,6 +2404,19 @@ export const DIAMOND_ABI = [
     "name": "joinTournamentAndRoom",
     "outputs": [],
     "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "tournamentId",
+        "type": "uint256"
+      }
+    ],
+    "name": "leaveTournament",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -2449,31 +2522,6 @@ export const DIAMOND_ABI = [
       }
     ],
     "name": "BuyInSlashed",
-    "type": "event"
-  },
-  {
-    "anonymous": false,
-    "inputs": [
-      {
-        "indexed": true,
-        "internalType": "address",
-        "name": "player",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "address",
-        "name": "token",
-        "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "uint256",
-        "name": "amount",
-        "type": "uint256"
-      }
-    ],
-    "name": "RefundQueued",
     "type": "event"
   },
   {
