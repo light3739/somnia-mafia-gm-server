@@ -188,15 +188,14 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
         const state = await ServerStore.getDiscussionState(String(roomId), Number(dayCount || 1), Number(chainId || 50312));
         if (!state || state.finished) return res.status(400).json({ error: 'Not active' });
 
-        // Verify it's current speaker or host
+        // Verify requester is alive
+        const isAlive = alivePlayers.some((p: any) => p.wallet.toLowerCase() === String(playerAddress).toLowerCase());
+        if (!isAlive) return res.status(403).json({ error: 'Dead players cannot skip' });
+
+        // Verify it's current speaker
         const currentSpeaker = alivePlayers[state.currentSpeakerIndex];
         const isSpeaker = currentSpeaker?.wallet.toLowerCase() === String(playerAddress).toLowerCase();
-        
-        // Host check - skip for now or can add getRoom lookup
-        if (!isSpeaker) {
-             // Optional: lookup room to verify host
-             // For now, only speaker can skip local or host must sign
-        }
+        if (!isSpeaker) return res.status(403).json({ error: 'Only current speaker can skip' });
 
         const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, true, Number(chainId || 50312));
         logger.info({ roomId, dayCount, skippedBy: playerAddress, nextIndex: newState?.currentSpeakerIndex }, '[discussion] Speaker skipped');

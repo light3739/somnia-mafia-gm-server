@@ -45,6 +45,10 @@ interface SocketMeta {
   roomKey: string | null;
   playerAddress: string | null;
   alive: boolean;
+  /** Relay rate limiting: timestamp of last relay */
+  lastRelayTs: number;
+  /** Relay count in current window */
+  relayCount: number;
 }
 
 const HEARTBEAT_INTERVAL_MS = 30_000;
@@ -101,7 +105,7 @@ class WsManager {
   // ── Connection handling ─────────────────────────────────────────────────
 
   private handleConnection(ws: WebSocket) {
-    const m: SocketMeta = { roomKey: null, playerAddress: null, alive: true };
+    const m: SocketMeta = { roomKey: null, playerAddress: null, alive: true, lastRelayTs: 0, relayCount: 0 };
     this.meta.set(ws, m);
 
     ws.on('pong', () => {
@@ -131,6 +135,14 @@ class WsManager {
     if (msg.type === 'relay') {
       const m = this.meta.get(ws);
       if (!m?.roomKey || !msg.event) return;
+
+      // Rate limit: max 10 relays per second per client
+      const now = Date.now();
+      if (now - m.lastRelayTs > 1000) {
+        m.lastRelayTs = now;
+        m.relayCount = 0;
+      }
+      if (++m.relayCount > 10) return; // silently drop
 
       if (msg.event.type === 'mafia-chat') {
         // Mafia-only relay: send to players whose address is in the mafiaMembers set

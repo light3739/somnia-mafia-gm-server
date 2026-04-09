@@ -206,12 +206,24 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
   });
 
   router.get('/room-roles/:roomId', pollLimiter, async (req, res) => {
-    // Roles are public after game ends. No auth required.
+    // Roles are public ONLY after game ends.
     const { chainId } = req.query as Record<string, string>;
-    const roomKey = store.getRoomKey(Number(chainId), req.params.roomId);
+    const effectiveCid = Number(chainId) || 50312;
+
+    // Phase check: only allow in ENDED phase
+    try {
+      const room = await getRoom(BigInt(req.params.roomId), effectiveCid);
+      if (Number(room.phase) !== GamePhase.ENDED) {
+        return res.status(403).json({ error: 'Roles are only public after game ends' });
+      }
+    } catch {
+      return res.status(400).json({ error: 'Invalid room' });
+    }
+
+    const roomKey = store.getRoomKey(effectiveCid, req.params.roomId);
     const cached = store.resolvedRoles.get(roomKey);
     if (!cached) return res.status(202).json({ pending: true });
-    
+
     const result: Record<string, string> = {};
     const roleToString: Record<number, string> = {
       1: 'MAFIA', 2: 'DOCTOR', 3: 'DETECTIVE', 4: 'CIVILIAN'

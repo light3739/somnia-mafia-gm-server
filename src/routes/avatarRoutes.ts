@@ -57,6 +57,13 @@ export function createAvatarRoutes(ctx: AvatarRoutesContext) {
       if (!avatar.startsWith('data:image/')) {
         return res.status(400).json({ error: 'Invalid avatar format' });
       }
+      // Block SVG (XSS vector) and enforce size limit
+      if (avatar.startsWith('data:image/svg')) {
+        return res.status(400).json({ error: 'SVG avatars not allowed' });
+      }
+      if (avatar.length > 500_000) { // ~375KB decoded
+        return res.status(400).json({ error: 'Avatar too large (max 375KB)' });
+      }
 
       await ServerStore.storeAvatar(String(roomId), String(address), String(avatar), String(chainId || 50312));
       logger.info({ roomId, player: address, chainId }, '[storeAvatar] Avatar updated');
