@@ -6,6 +6,7 @@
  */
 import { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';
+import { verifyMessage } from 'viem';
 import { logger } from '../utils/logger.js';
 
 // ── Event protocol ──────────────────────────────────────────────────────────
@@ -16,6 +17,12 @@ export interface ClientMessage {
   roomId: number;
   chainId: number;
   playerAddress: string;
+  /** Auth: signature of `ws-join:chainId:roomId:timestamp` */
+  signature?: string;
+  /** Auth: address that signed (may differ from playerAddress if session key) */
+  signerAddress?: string;
+  /** Auth: timestamp (ms) when signature was created */
+  timestamp?: number;
   /** For relay messages: the event to broadcast to other players in the room. */
   event?: ServerEvent;
 }
@@ -68,9 +75,20 @@ class WsManager {
   /** per-socket metadata */
   private meta = new WeakMap<WebSocket, SocketMeta>();
 
+  /** Session cache reference for verifying session key ownership on WS join */
+  private sessionCache: Map<string, { sessionAddress: string }> | null = null;
+
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   // ── Lifecycle ───────────────────────────────────────────────────────────
+
+  /**
+   * Provide session cache so WS auth can resolve session keys.
+   * Called once at startup from index.ts.
+   */
+  setSessionCache(cache: Map<string, { sessionAddress: string }>) {
+    this.sessionCache = cache;
+  }
 
   /**
    * Attach to a WebSocketServer and start accepting connections.
@@ -115,7 +133,9 @@ class WsManager {
     ws.on('message', (raw) => {
       try {
         const msg: ClientMessage = JSON.parse(raw.toString());
-        this.handleClientMessage(ws, msg);
+        this.handleClientMessage(ws, msg).catch((err) => {
+          logger.error({ err }, '[WS] Error handling message');
+        });
       } catch {
         this.send(ws, { type: 'error', data: 'Invalid message format' });
       }
@@ -128,7 +148,7 @@ class WsManager {
     });
   }
 
-  private handleClientMessage(ws: WebSocket, msg: ClientMessage) {
+  private async handleClientMessage(ws: WebSocket, msg: ClientMessage) {
     // Relay: client sends an event to broadcast to other players in the room.
     // For mafia-chat: only relay to other mafia members (not the whole room)
     // to avoid leaking even the existence of messages to non-mafia players.
@@ -173,10 +193,57 @@ class WsManager {
     }
 
     if (msg.type === 'join') {
-      const { roomId, chainId, playerAddress } = msg;
+      const { roomId, chainId, playerAddress, signature, signerAddress, timestamp } = msg;
 
       if (!roomId || !chainId || !playerAddress) {
         this.send(ws, { type: 'error', data: 'Missing roomId, chainId, or playerAddress' });
+        return;
+      }
+
+      // Verify signature (required)
+      if (!signature || !timestamp) {
+        this.send(ws, { type: 'error', data: 'Missing signature or timestamp' });
+        ws.close(4001, 'Unauthorized');
+        return;
+      }
+
+      // Check timestamp freshness (±60s)
+      const age = Date.now() - timestamp;
+      if (age > 60_000 || age < -10_000) {
+        this.send(ws, { type: 'error', data: 'Timestamp expired' });
+        ws.close(4001, 'Unauthorized');
+        return;
+      }
+
+      const expectedMessage = `ws-join:${chainId}:${roomId}:${timestamp}`;
+      const expectedSigner = (signerAddress || playerAddress).toLowerCase();
+
+      try {
+        const valid = await verifyMessage({
+          address: expectedSigner as `0x${string}`,
+          message: expectedMessage,
+          signature: signature as `0x${string}`,
+        });
+
+        if (!valid) {
+          this.send(ws, { type: 'error', data: 'Invalid signature' });
+          ws.close(4001, 'Unauthorized');
+          return;
+        }
+
+        // If signer differs from player, verify it's a valid session key
+        if (expectedSigner !== playerAddress.toLowerCase()) {
+          const cacheKey = `${chainId}:${playerAddress.toLowerCase()}`;
+          const cached = this.sessionCache?.get(cacheKey);
+          if (!cached || cached.sessionAddress.toLowerCase() !== expectedSigner) {
+            this.send(ws, { type: 'error', data: 'Session key not recognized' });
+            ws.close(4001, 'Unauthorized');
+            return;
+          }
+        }
+      } catch {
+        this.send(ws, { type: 'error', data: 'Signature verification failed' });
+        ws.close(4001, 'Unauthorized');
         return;
       }
 

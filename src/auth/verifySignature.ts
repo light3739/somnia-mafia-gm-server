@@ -47,11 +47,15 @@ export function createAuthService(ctx: AuthContext) {
       if (Number.isFinite(tsNum)) {
         const now = Date.now();
         const age = now - tsNum;
-        if (age > 300_000 || age < -30_000) {
-          return { ok: false, error: 'Timestamp expired or too far in future (max ±5 min)', status: 401 };
+        if (age > 60_000 || age < -10_000) {
+          return { ok: false, error: 'Timestamp expired or too far in future (max ±60s)', status: 401 };
         }
 
-        const scope = params.nonceScope || 'default';
+        // Derive scope from the signed message action (e.g. "night:50312:42:..." → "night")
+        // This prevents cross-action nonce reuse without changing any callers.
+        const modernMsg = buildModernMessage(nonce, tsNum);
+        const derivedAction = modernMsg.split(':')[0] || 'default';
+        const scope = params.nonceScope || derivedAction;
         const isFirstTime = await ServerStore.consumeReplayNonce(scope, roomId, normalizedSigner, nonce, undefined, chainId);
         if (!isFirstTime) {
           return { ok: false, error: 'Nonce already used (potential replay)', status: 401 };

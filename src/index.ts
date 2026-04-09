@@ -97,6 +97,9 @@ async function start() {
     logger.warn('[main] Redis not available, starting with empty memory.');
   }
 
+  // Provide session cache to WS manager for join auth
+  wsManager.setSessionCache(store.sessionCache);
+
   // Start background log listener
   LogListener.start();
 
