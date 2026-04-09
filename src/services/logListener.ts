@@ -211,20 +211,27 @@ export class LogListener {
       case 'GameEnded': {
         const winCondition = (args.winCondition as string) || '';
         const lower = winCondition.toLowerCase();
-        const winner = lower.includes('town') ? 'Town' : lower.includes('mafia') ? 'Mafia' : 'Unknown';
-        message = `Game Over! ${winner} wins! (${winCondition})`;
-        type = 'success';
+        if (lower.includes('aborted')) {
+          // Pre-DAY abort: LibGame.abortPreGame ended the room before DAY,
+          // every player (including the one who ghosted) got their buy-in
+          // + deposit refunded in full.
+          message = 'Game aborted before start — everyone refunded (deposit + buy-in).';
+          type = 'warning';
+        } else {
+          const winner = lower.includes('town') ? 'Town' : lower.includes('mafia') ? 'Mafia' : 'Unknown';
+          message = `Game Over! ${winner} wins! (${winCondition})`;
+          type = 'success';
+        }
         break;
       }
 
       case 'RoomReturnedToLobby':
-        // Pre-DAY failure (SHUFFLING/REVEAL timeout): contract rewound the
-        // room back to LOBBY via kickAfkAndReturnToLobby. Surface in-game
-        // feed so remaining players know what happened without opening the
-        // explorer. Coordinates with the frontend's phase-rewind toast.
-        message = 'Game aborted before start — AFK players kicked, room returned to lobby.';
-        type = 'warning';
-        break;
+        // Legacy event — the old kickAfkAndReturnToLobby path rewound the
+        // room back to LOBBY on pre-DAY timeout. The new abortPreGame model
+        // ENDs the room outright and emits GameEnded("Aborted pre-game")
+        // instead. Kept as a defensive no-op for historical log replay;
+        // new contracts never emit this event.
+        return;
 
       default:
         return; // Don't log unknown events
