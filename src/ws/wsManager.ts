@@ -58,6 +58,9 @@ class WsManager {
   /** playerAddress (lower) → socket for targeted messages */
   private playerSockets = new Map<string, WebSocket>();
 
+  /** roomKey → set of mafia player addresses (lower). Used to filter mafia-chat relay. */
+  private roomMafia = new Map<string, Set<string>>();
+
   /** per-socket metadata */
   private meta = new WeakMap<WebSocket, SocketMeta>();
 
@@ -122,17 +125,36 @@ class WsManager {
   }
 
   private handleClientMessage(ws: WebSocket, msg: ClientMessage) {
-    // Relay: client sends an event to broadcast to all OTHER players in the room
+    // Relay: client sends an event to broadcast to other players in the room.
+    // For mafia-chat: only relay to other mafia members (not the whole room)
+    // to avoid leaking even the existence of messages to non-mafia players.
     if (msg.type === 'relay') {
       const m = this.meta.get(ws);
       if (!m?.roomKey || !msg.event) return;
-      // Broadcast to everyone in the room EXCEPT the sender
-      const sockets = this.rooms.get(m.roomKey);
-      if (!sockets) return;
-      const payload = JSON.stringify(msg.event);
-      for (const peer of sockets) {
-        if (peer !== ws && peer.readyState === WebSocket.OPEN) {
-          peer.send(payload);
+
+      if (msg.event.type === 'mafia-chat') {
+        // Mafia-only relay: send to players whose address is in the mafiaMembers set
+        const mafiaSet = this.roomMafia.get(m.roomKey);
+        if (!mafiaSet) return; // No mafia registered yet — drop silently
+        const sockets = this.rooms.get(m.roomKey);
+        if (!sockets) return;
+        const payload = JSON.stringify(msg.event);
+        for (const peer of sockets) {
+          if (peer === ws) continue;
+          const peerMeta = this.meta.get(peer);
+          if (peerMeta?.playerAddress && mafiaSet.has(peerMeta.playerAddress) && peer.readyState === WebSocket.OPEN) {
+            peer.send(payload);
+          }
+        }
+      } else {
+        // Generic relay: broadcast to everyone in the room except sender
+        const sockets = this.rooms.get(m.roomKey);
+        if (!sockets) return;
+        const payload = JSON.stringify(msg.event);
+        for (const peer of sockets) {
+          if (peer !== ws && peer.readyState === WebSocket.OPEN) {
+            peer.send(payload);
+          }
         }
       }
       return;
@@ -228,6 +250,18 @@ class WsManager {
       ws.send(JSON.stringify(event));
       logger.debug(`[WS] Sent ${event.type} to player ${playerAddress.slice(0, 8)}...`);
     }
+  }
+
+  // ── Mafia membership ─────────────────────────────────────────────────
+
+  /**
+   * Register which players are mafia in a room. Called by eciesRoutes
+   * after roles are resolved. Enables filtered mafia-chat relay.
+   */
+  setRoomMafia(roomId: string | number, chainId: number, mafiaAddresses: string[]) {
+    const roomKey = `${chainId}:${roomId}`;
+    this.roomMafia.set(roomKey, new Set(mafiaAddresses.map(a => a.toLowerCase())));
+    logger.debug(`[WS] Registered ${mafiaAddresses.length} mafia members for room ${roomKey}`);
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────

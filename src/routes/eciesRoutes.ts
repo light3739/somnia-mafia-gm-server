@@ -118,6 +118,10 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
             if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr.toLowerCase(), role);
           }
         });
+        // Register mafia members for filtered WS relay (mafia-chat)
+        const mafiaAddrs = allAddrsInOrder.filter(addr => roomRoles.get(addr.toLowerCase()) === Role.MAFIA);
+        wsManager.setRoomMafia(String(roomId), Number(chainId), mafiaAddrs);
+
         // Push role-ready to each player via WS
         for (const addr of allAddrsInOrder) {
           wsManager.sendToPlayer(addr, {

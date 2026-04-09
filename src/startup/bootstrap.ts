@@ -6,6 +6,8 @@ import { getChainConfig, getPlayers, DIAMOND_ABI, FLAGS } from '../chain.js';
 import { getAllNightStates, injectNightState, getNightState } from '../game-state.js';
 import { sraDecryptCard, roleFromCardValue } from '../crypto/sra.js';
 import { doResolveNight, nightChainIds } from '../routes/nightRoutes.js';
+import { wsManager } from '../ws/wsManager.js';
+import { Role } from '../types/contract.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 
@@ -24,6 +26,18 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
     roomChains: store.roomChains,
     injectNight: injectNightState,
   });
+
+  // Register mafia members for WS relay filtering (from Redis-loaded roles)
+  for (const [roomKey, roles] of store.resolvedRoles) {
+    const mafiaAddrs: string[] = [];
+    for (const [addr, role] of roles) {
+      if (role === Role.MAFIA) mafiaAddrs.push(addr);
+    }
+    if (mafiaAddrs.length > 0) {
+      const [chainIdStr, roomIdStr] = roomKey.split(':');
+      wsManager.setRoomMafia(roomIdStr, Number(chainIdStr), mafiaAddrs);
+    }
+  }
 
   // Re-arm night timers
   for (const [roomIdStr, nightState] of getAllNightStates()) {
