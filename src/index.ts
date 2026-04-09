@@ -1,10 +1,12 @@
 /**
  * Mafia GM Server - Multi-Chain Edition
  */
+import { createServer } from 'http';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
+import { WebSocketServer } from 'ws';
 
 import { GMStore } from './stores/index.js';
 import { connectRedis, getRedis } from './redis.js';
@@ -23,6 +25,7 @@ import { createLogRoutes } from './routes/logRoutes.js';
 import { LogListener } from './services/logListener.js';
 
 import { logger } from './utils/logger.js';
+import { wsManager } from './ws/wsManager.js';
 
 dotenv.config();
 
@@ -63,7 +66,11 @@ const actionLimiter = rateLimit({ windowMs: 1000, max: 15, skip: skipOptions, me
 const heavyLimiter = rateLimit({ windowMs: 20000, max: 15, skip: skipOptions, message: { error: 'Heavy action rate limit exceeded' } });
 
 // Health Check
-app.get('/health', (_req, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+app.get('/health', (_req, res) => res.json({
+  status: 'ok',
+  uptime: process.uptime(),
+  ws: { connections: wsManager.totalConnections, rooms: wsManager.activeRooms },
+}));
 
 // Initialize Routes
 const routesCtx = { store, verifyAuthorizedSignature: auth.verifyAuthorizedSignature, actionLimiter, pollLimiter, heavyLimiter, redis: getRedis() };
@@ -93,8 +100,13 @@ async function start() {
   // Start background log listener
   LogListener.start();
 
-  app.listen(port, () => {
-    logger.info(`[main] GM Server listening on port ${port}`);
+  // HTTP + WebSocket on the same port
+  const httpServer = createServer(app);
+  const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+  wsManager.attach(wss);
+
+  httpServer.listen(port, () => {
+    logger.info(`[main] GM Server listening on port ${port} (HTTP + WS)`);
   });
 }
 

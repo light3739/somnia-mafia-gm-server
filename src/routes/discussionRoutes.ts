@@ -10,6 +10,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 import { logger } from '../utils/logger.js';
+import { wsManager } from '../ws/wsManager.js';
 
 export interface DiscussionRoutesContext {
   store: GMStore;
@@ -68,14 +69,29 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
           const elapsed = (Date.now() - state.speakerStartTime) / 1000;
           if (elapsed >= state.speakerDuration) {
             const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, false, Number(chainId || 50312));
-            if (newState) state = newState;
+            if (newState) {
+              state = newState;
+              // Push auto-advance to WS clients
+              const nextSpeaker = alivePlayers[newState.currentSpeakerIndex];
+              wsManager.broadcastToRoom(String(roomId), Number(chainId || 50312), {
+                type: 'discussion-update',
+                data: { currentSpeakerAddress: nextSpeaker?.wallet || null, currentSpeakerIndex: newState.currentSpeakerIndex, phase: newState.phase, finished: newState.finished },
+              });
+            }
           }
         } else if (state.phase === 'initial_delay') {
           const delayElapsed = (Date.now() - (state.delayStartTime || 0)) / 1000;
           const delayDuration = state.delayDuration || 5;
           if (delayElapsed >= delayDuration) {
             const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, false, Number(chainId || 50312));
-            if (newState) state = newState;
+            if (newState) {
+              state = newState;
+              const nextSpeaker = alivePlayers[newState.currentSpeakerIndex];
+              wsManager.broadcastToRoom(String(roomId), Number(chainId || 50312), {
+                type: 'discussion-update',
+                data: { currentSpeakerAddress: nextSpeaker?.wallet || null, currentSpeakerIndex: newState.currentSpeakerIndex, phase: newState.phase, finished: newState.finished },
+              });
+            }
           }
         }
       }
@@ -157,6 +173,14 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
         };
         await ServerStore.setDiscussionState(String(roomId), Number(dayCount || 1), newState, Number(chainId || 50312));
         logger.info({ roomId, dayCount, chainId }, '[discussion] Discussion started');
+
+        // Push discussion start to WS clients
+        const firstSpeaker = alivePlayers[0];
+        wsManager.broadcastToRoom(String(roomId), Number(chainId || 50312), {
+          type: 'discussion-update',
+          data: { currentSpeakerAddress: firstSpeaker?.wallet || null, currentSpeakerIndex: 0, phase: 'initial_delay', finished: false },
+        });
+
         return res.json({ ok: true });
       }
 
@@ -176,6 +200,16 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
 
         const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, true, Number(chainId || 50312));
         logger.info({ roomId, dayCount, skippedBy: playerAddress, nextIndex: newState?.currentSpeakerIndex }, '[discussion] Speaker skipped');
+
+        // Push skip to WS clients
+        if (newState) {
+          const nextSpeaker = alivePlayers[newState.currentSpeakerIndex];
+          wsManager.broadcastToRoom(String(roomId), Number(chainId || 50312), {
+            type: 'discussion-update',
+            data: { currentSpeakerAddress: nextSpeaker?.wallet || null, currentSpeakerIndex: newState.currentSpeakerIndex, phase: newState.phase, finished: newState.finished },
+          });
+        }
+
         return res.json({ ok: true, newState });
       }
 

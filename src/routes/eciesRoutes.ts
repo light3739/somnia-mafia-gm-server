@@ -12,6 +12,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 import { logger } from '../utils/logger.js';
+import { wsManager } from '../ws/wsManager.js';
 
 export interface EciesRoutesContext {
   store: GMStore;
@@ -117,6 +118,13 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
             if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr.toLowerCase(), role);
           }
         });
+        // Push role-ready to each player via WS
+        for (const addr of allAddrsInOrder) {
+          wsManager.sendToPlayer(addr, {
+            type: 'role-ready',
+            data: { playerAddress: addr.toLowerCase() },
+          });
+        }
       } else if (shufflerAddrs.length > 0) {
         logger.info({ roomId, missingFrom: missingKeys }, '[ECIES] Waiting for more SRA keys');
       }

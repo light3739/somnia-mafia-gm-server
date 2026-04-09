@@ -18,6 +18,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 import { logger } from '../utils/logger.js';
+import { wsManager } from '../ws/wsManager.js';
 
 // 60s — must be strictly LESS than on-chain LibGame.NIGHT_TIMEOUT (90s) so GM has
 // time to land its resolveNightAsGameMaster tx before any player can call forcePhaseTimeout.
@@ -98,6 +99,16 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
   try {
     await resolveNight(rid, killTarget, healTarget, effectiveChainId);
     logger.info({ roomId: roomIdStr }, '[doResolveNight] Night resolved successfully');
+
+    // Push night result to all WS clients
+    wsManager.broadcastToRoom(roomIdStr, effectiveChainId, {
+      type: 'night-resolved',
+      data: {
+        killTarget,
+        healTarget,
+        isSafe: killTarget === '0x0000000000000000000000000000000000000000',
+      },
+    });
   } catch (err: any) {
     const reason = err.shortMessage || err.cause?.shortMessage || err.message || String(err);
     logger.error({ roomId: roomIdStr, chainId: effectiveChainId, reason }, '[doResolveNight] On-chain resolution failed');

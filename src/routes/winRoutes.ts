@@ -13,6 +13,7 @@ import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 import { logger } from '../utils/logger.js';
+import { wsManager } from '../ws/wsManager.js';
 
 const zkMutex = new Mutex();
 
@@ -124,10 +125,18 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       }
       if (mafiaCount === 0) {
         logger.info({ roomId: req.params.roomId }, '[win-check] Town wins detected');
+        wsManager.broadcastToRoom(req.params.roomId, effectiveCid, {
+          type: 'win-detected',
+          data: { result: 'TOWN_WIN' },
+        });
         return res.json({ winDetected: true, result: 'TOWN_WIN' });
       }
       if (mafiaCount >= townCount) {
         logger.info({ roomId: req.params.roomId }, '[win-check] Mafia wins detected');
+        wsManager.broadcastToRoom(req.params.roomId, effectiveCid, {
+          type: 'win-detected',
+          data: { result: 'MAFIA_WIN' },
+        });
         return res.json({ winDetected: true, result: 'MAFIA_WIN' });
       }
       return res.json({ winDetected: false });
@@ -236,6 +245,22 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       );
 
       logger.info({ roomId, hash }, '[reveal-roles] Roles revealed on-chain');
+
+      // Push revealed roles to all WS clients (use GM-resolved roles for full detail)
+      const roomKey = store.getRoomKey(effectiveCid, roomId);
+      const cachedRoles = store.resolvedRoles.get(roomKey);
+      if (cachedRoles) {
+        const roleToString: Record<number, string> = { 1: 'MAFIA', 2: 'DOCTOR', 3: 'DETECTIVE', 4: 'CIVILIAN' };
+        const revealedRoles: Record<string, string> = {};
+        for (const [addr, role] of cachedRoles.entries()) {
+          revealedRoles[addr.toLowerCase()] = roleToString[role as number] || 'UNKNOWN';
+        }
+        wsManager.broadcastToRoom(roomId, effectiveCid, {
+          type: 'roles-revealed',
+          data: { roles: revealedRoles },
+        });
+      }
+
       return res.json({ ok: true, hash });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);

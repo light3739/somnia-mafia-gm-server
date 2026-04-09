@@ -1,6 +1,7 @@
 import { DIAMOND_ABI, getChainConfig, somniaTestnet } from '../chain.js';
 import { ServerStore, type GameLogEntry } from './serverStore.js';
 import { logger } from '../utils/logger.js';
+import { wsManager } from '../ws/wsManager.js';
 
 // Nickname cache: chainId -> roomId -> address -> nickname
 // Populated from PlayerJoined events so we can resolve names in later events.
@@ -238,14 +239,37 @@ export class LogListener {
     }
 
     if (message) {
-      await ServerStore.addGameLog(roomId, {
-        id: entryId,
-        message,
-        type,
-        timestamp,
-        eventType,
-        eventData
-      }, chainId);
+      const logEntry: GameLogEntry = { id: entryId, message, type, timestamp, eventType, eventData };
+      await ServerStore.addGameLog(roomId, logEntry, chainId);
+
+      // Push log to all WS clients in this room
+      wsManager.broadcastToRoom(roomId, chainId, { type: 'log', data: logEntry });
+    }
+
+    // Push structured events so frontend can react without polling
+    switch (eventName) {
+      case 'GameStarted':
+      case 'DayStarted':
+      case 'VotingStarted':
+      case 'NightStarted':
+      case 'GameEnded':
+        wsManager.broadcastToRoom(roomId, chainId, {
+          type: 'phase-change',
+          data: { event: eventName, dayNumber: eventData?.dayNumber },
+        });
+        break;
+
+      case 'PlayerJoined':
+      case 'PlayerEliminated':
+      case 'VoteCast':
+      case 'VotingFinalized':
+      case 'NightFinalized':
+      case 'NightResolvedByGM':
+        wsManager.broadcastToRoom(roomId, chainId, {
+          type: 'player-update',
+          data: { trigger: eventName },
+        });
+        break;
     }
   }
 
