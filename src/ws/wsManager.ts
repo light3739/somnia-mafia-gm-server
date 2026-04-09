@@ -12,10 +12,12 @@ import { logger } from '../utils/logger.js';
 
 /** Messages the client sends to the server. */
 export interface ClientMessage {
-  type: 'join';
+  type: 'join' | 'relay';
   roomId: number;
   chainId: number;
   playerAddress: string;
+  /** For relay messages: the event to broadcast to other players in the room. */
+  event?: ServerEvent;
 }
 
 /** Messages the server pushes to clients. */
@@ -29,6 +31,8 @@ export interface ServerEvent {
     | 'win-detected'
     | 'player-update'
     | 'roles-revealed'
+    | 'mafia-chat'
+    | 'game-signal'
     | 'pong'
     | 'joined'
     | 'error';
@@ -118,6 +122,22 @@ class WsManager {
   }
 
   private handleClientMessage(ws: WebSocket, msg: ClientMessage) {
+    // Relay: client sends an event to broadcast to all OTHER players in the room
+    if (msg.type === 'relay') {
+      const m = this.meta.get(ws);
+      if (!m?.roomKey || !msg.event) return;
+      // Broadcast to everyone in the room EXCEPT the sender
+      const sockets = this.rooms.get(m.roomKey);
+      if (!sockets) return;
+      const payload = JSON.stringify(msg.event);
+      for (const peer of sockets) {
+        if (peer !== ws && peer.readyState === WebSocket.OPEN) {
+          peer.send(payload);
+        }
+      }
+      return;
+    }
+
     if (msg.type === 'join') {
       const { roomId, chainId, playerAddress } = msg;
 
