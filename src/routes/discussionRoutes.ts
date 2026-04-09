@@ -3,7 +3,7 @@
  * Standardized routes for turn-based speaking during DAY phase.
  */
 import { Router } from 'express';
-import { getPlayers, FLAGS } from '../chain.js';
+import { getPlayers, getRoom, FLAGS } from '../chain.js';
 import { ServerStore } from '../services/serverStore.js';
 import type { GMStore } from '../stores/index.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
@@ -192,10 +192,15 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
         const isAlive = alivePlayers.some((p: any) => p.wallet.toLowerCase() === String(playerAddress).toLowerCase());
         if (!isAlive) return res.status(403).json({ error: 'Dead players cannot skip' });
 
-        // Verify it's current speaker
+        // Verify it's current speaker OR room host
         const currentSpeaker = alivePlayers[state.currentSpeakerIndex];
         const isSpeaker = currentSpeaker?.wallet.toLowerCase() === String(playerAddress).toLowerCase();
-        if (!isSpeaker) return res.status(403).json({ error: 'Only current speaker can skip' });
+        let isHost = false;
+        try {
+          const room = await getRoom(rid, Number(chainId || 50312));
+          isHost = (room.host as string).toLowerCase() === String(playerAddress).toLowerCase();
+        } catch { /* ignore — host check is best-effort */ }
+        if (!isSpeaker && !isHost) return res.status(403).json({ error: 'Only current speaker or host can skip' });
 
         const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, true, Number(chainId || 50312));
         logger.info({ roomId, dayCount, skippedBy: playerAddress, nextIndex: newState?.currentSpeakerIndex }, '[discussion] Speaker skipped');

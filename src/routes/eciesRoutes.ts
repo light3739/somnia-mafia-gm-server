@@ -210,11 +210,11 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     const { chainId } = req.query as Record<string, string>;
     const effectiveCid = Number(chainId) || 50312;
 
-    // Phase check: only allow in ENDED phase
+    // Phase check: only reveal roles after game ends
     try {
       const room = await getRoom(BigInt(req.params.roomId), effectiveCid);
       if (Number(room.phase) !== GamePhase.ENDED) {
-        return res.status(403).json({ error: 'Roles are only public after game ends' });
+        return res.status(202).json({ pending: true, message: 'Roles available after game ends' });
       }
     } catch {
       return res.status(400).json({ error: 'Invalid room' });
