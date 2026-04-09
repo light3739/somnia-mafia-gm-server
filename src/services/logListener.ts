@@ -217,6 +217,15 @@ export class LogListener {
         break;
       }
 
+      case 'RoomReturnedToLobby':
+        // Pre-DAY failure (SHUFFLING/REVEAL timeout): contract rewound the
+        // room back to LOBBY via kickAfkAndReturnToLobby. Surface in-game
+        // feed so remaining players know what happened without opening the
+        // explorer. Coordinates with the frontend's phase-rewind toast.
+        message = 'Game aborted before start — AFK players kicked, room returned to lobby.';
+        type = 'warning';
+        break;
+
       default:
         return; // Don't log unknown events
     }
