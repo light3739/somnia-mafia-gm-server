@@ -30,7 +30,9 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.0.0",
     "@types/snarkjs": "^0.7.9",
+    "@types/supertest": "^7.2.0",
     "@types/ws": "^8.18.1",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^4.1.4"
