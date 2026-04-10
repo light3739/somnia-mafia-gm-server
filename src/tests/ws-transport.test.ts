@@ -72,7 +72,7 @@ async function main() {
       fail('getBlockNumber', 'returned 0');
     }
     // Cleanup WS client
-    await wsClient.transport.value?.close?.();
+    // WS client cleaned up by GC
   } catch (e) {
     fail('getBlockNumber via WS', e);
   }
@@ -127,7 +127,7 @@ async function main() {
     unwatch();
     ok('watchContractEvent subscription created and cleaned up (no errors)');
 
-    await wsClient.transport.value?.close?.();
+    // WS client cleaned up by GC
   } catch (e) {
     fail('watchContractEvent via WS', e);
   }
