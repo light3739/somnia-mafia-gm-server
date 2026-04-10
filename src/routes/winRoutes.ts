@@ -2,7 +2,7 @@
  * routes/winRoutes.ts
  */
 import { Router } from 'express';
-import { getRoom, getPlayers, FLAGS, revealRolesOnChain } from '../chain.js';
+import { getRoom, getPlayers, FLAGS, revealRolesOnChain, reportRoomGasCost } from '../chain.js';
 import { Role } from '../types/contract.js';
 import type { GMStore } from '../stores/index.js';
 import { ServerStore } from '../services/serverStore.js';
@@ -245,6 +245,11 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       );
 
       logger.info({ roomId, hash }, '[reveal-roles] Roles revealed on-chain');
+
+      // Report GM gas costs for this room (fire-and-forget)
+      reportRoomGasCost(BigInt(roomId), effectiveCid).catch((e: any) =>
+        logger.error({ err: e.message, roomId }, '[reveal-roles] reportRoomGasCost failed')
+      );
 
       // Push revealed roles to all WS clients (use GM-resolved roles for full detail)
       const roomKey = store.getRoomKey(effectiveCid, roomId);

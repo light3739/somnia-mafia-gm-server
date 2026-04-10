@@ -151,6 +151,7 @@ export async function resolveNight(roomId: bigint, killTarget: Address, healTarg
   if ((receipt as any).status === 'reverted') {
     throw new Error(`resolveNightAsGameMaster reverted in block ${(receipt as any).blockNumber}`);
   }
+  trackGasCost(chainId, roomId, receipt);
   return { hash, receipt };
 }
 
@@ -182,7 +183,59 @@ export async function revealRolesOnChain(
   if ((receipt as any).status === 'reverted') {
     throw new Error(`revealRoles reverted in block ${(receipt as any).blockNumber}`);
   }
+  trackGasCost(chainId, roomId, receipt);
   return { hash, receipt };
+}
+
+// ─── GM Gas Tracking ─────────────────────────────────────
+// Tracks cumulative gas cost (wei) the GM spent per room so it can be
+// reported on-chain via reportRoomGasCost after the game ends.
+// Key: `${chainId}:${roomId}`
+const roomGasCosts = new Map<string, bigint>();
+
+function gasKey(chainId: number | undefined, roomId: bigint): string {
+  return `${chainId ?? somniaTestnet.id}:${roomId}`;
+}
+
+function trackGasCost(chainId: number | undefined, roomId: bigint, receipt: any) {
+  const cost = BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice);
+  const key = gasKey(chainId, roomId);
+  roomGasCosts.set(key, (roomGasCosts.get(key) ?? 0n) + cost);
+  logger.info({ roomId: roomId.toString(), gasCost: cost.toString(), total: roomGasCosts.get(key)!.toString() },
+    '[gas] Tracked GM gas cost');
+}
+
+export async function reportRoomGasCost(roomId: bigint, chainId?: number) {
+  const key = gasKey(chainId, roomId);
+  const total = roomGasCosts.get(key) ?? 0n;
+  if (total === 0n) {
+    logger.info({ roomId: roomId.toString() }, '[gas] No GM gas to report');
+    return;
+  }
+
+  const { wallet: client, public: publicClient, diamond } = getChainConfig(chainId);
+  try {
+    const hash = await client.writeContract({
+      address: diamond,
+      abi: DIAMOND_ABI,
+      functionName: 'reportRoomGasCost',
+      args: [roomId, total > 300000000000000000n ? 300000000000000000n : total],
+      chain: null,
+    });
+    logger.info({ roomId: roomId.toString(), hash, amount: total.toString() }, '[gas] reportRoomGasCost tx sent');
+
+    await Promise.race([
+      publicClient.waitForTransactionReceipt({ hash }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('reportRoomGasCost timeout')), 30_000)
+      ),
+    ]);
+    logger.info({ roomId: roomId.toString() }, '[gas] reportRoomGasCost confirmed');
+  } catch (e: any) {
+    logger.error({ err: e.message, roomId: roomId.toString() }, '[gas] reportRoomGasCost failed');
+  } finally {
+    roomGasCosts.delete(key);
+  }
 }
 
 export async function assertChainConfigOrThrow() {

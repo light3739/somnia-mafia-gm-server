@@ -2403,4 +2403,15 @@ export const DIAMOND_ABI = [
     "stateMutability": "view",
     "type": "function"
   }
+  ,
+  {
+    "inputs": [
+      { "internalType": "uint256", "name": "roomId", "type": "uint256" },
+      { "internalType": "uint128", "name": "amount", "type": "uint128" }
+    ],
+    "name": "reportRoomGasCost",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
 ] as const;
