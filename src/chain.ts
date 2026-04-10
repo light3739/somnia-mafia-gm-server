@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { createPublicClient, createWalletClient, http, type Address, type Hex } from 'viem';
+import { createPublicClient, createWalletClient, http, webSocket, fallback, type Address, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { defineChain } from 'viem';
 import { DIAMOND_ABI } from './abi.js';
@@ -23,7 +23,12 @@ export const somniaTestnet = defineChain({
   id: 50312,
   name: 'Somnia Testnet',
   nativeCurrency: { name: 'STT', symbol: 'STT', decimals: 18 },
-  rpcUrls: { default: { http: [process.env.SOMNIA_RPC_URL || 'https://dream-rpc.somnia.network/'] } },
+  rpcUrls: {
+    default: {
+      http: [process.env.SOMNIA_RPC_URL || 'https://dream-rpc.somnia.network/'],
+      webSocket: [process.env.SOMNIA_WS_URL || 'wss://api.infra.testnet.somnia.network/ws'],
+    },
+  },
   blockExplorers: { default: { name: 'Explorer', url: 'https://shannon-explorer.somnia.network' } },
   testnet: true,
 });
@@ -53,7 +58,18 @@ const chainsConfig: Record<number, ChainConfig> = {
     diamond: AVAX_DIAMOND
   },
   [somniaTestnet.id]: {
-    public: createPublicClient({ chain: somniaTestnet, transport: http(somniaTestnet.rpcUrls.default.http[0]) }),
+    // WebSocket primary for event subscriptions, HTTP fallback for reliability.
+    // Wallet client stays HTTP (tx submission doesn't benefit from WS).
+    public: createPublicClient({
+      chain: somniaTestnet,
+      transport: fallback([
+        webSocket(somniaTestnet.rpcUrls.default.webSocket![0], {
+          reconnect: { delay: 2_000, attempts: 10 },
+          keepAlive: { interval: 25_000 },
+        }),
+        http(somniaTestnet.rpcUrls.default.http[0]),
+      ]),
+    }),
     wallet: createWalletClient({ account: gmAccount, chain: somniaTestnet, transport: http(somniaTestnet.rpcUrls.default.http[0]) }),
     diamond: SOMNIA_DIAMOND
   }
