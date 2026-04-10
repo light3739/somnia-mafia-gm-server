@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node dist/index.js",
     "build": "tsc",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",
@@ -30,6 +32,7 @@
     "@types/snarkjs": "^0.7.9",
     "@types/ws": "^8.18.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.4"
   }
 }
