@@ -8,6 +8,7 @@ import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
+import { wsManager } from '../ws/wsManager.js';
 
 import { logger } from '../utils/logger.js';
 
@@ -112,6 +113,91 @@ export function createRoomRoutes(ctx: RoomRoutesContext) {
       return res.json({ success: true, gmSignature });
     } catch (err: any) {
       logger.error({ err, roomId: req.body?.roomId }, '[request-join] Internal error');
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Rematch Invite ───────────────────────────────────────
+  // Host of a finished game calls this to broadcast a rematch invite to all
+  // players still subscribed to the old room's WS channel. Payload contains
+  // the newly-created room's id so clients can auto-join.
+  router.post('/rematch-invite', actionLimiter, async (req, res) => {
+    try {
+      const {
+        oldRoomId,
+        newRoomId,
+        hostAddress,
+        signature,
+        signerAddress,
+        nonce,
+        timestamp,
+        chainId,
+        lobbyName,
+        maxPlayers,
+        isPrivate,
+      } = req.body;
+
+      if (!oldRoomId || !newRoomId || !hostAddress || !signature) {
+        return res.status(400).json({ error: 'Missing req fields' });
+      }
+
+      const sigCheck = await verifyAuthorizedSignature({
+        roomId: String(oldRoomId),
+        playerAddress: String(hostAddress),
+        signature: String(signature) as `0x${string}`,
+        signerAddress, nonce, timestamp, chainId,
+        buildLegacyMessage: () => new SignatureBuilder('sendRematchInvite', chainId, oldRoomId).withAddress(hostAddress).withParam(String(newRoomId)).build(),
+        buildModernMessage: (n: string, ts: number) => new SignatureBuilder('sendRematchInvite', chainId, oldRoomId).withAddress(hostAddress).withParam(String(newRoomId)).withModern(n, ts).build(),
+      });
+
+      if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
+
+      // Verify the caller was actually the host of the finished (old) room.
+      let oldRoom: any = null;
+      try {
+        oldRoom = await getRoom(BigInt(oldRoomId), chainId ? Number(chainId) : undefined);
+      } catch (e: any) {
+        logger.warn({ oldRoomId, err: e.message }, '[rematch-invite] Old room lookup failed');
+      }
+      if (!oldRoom?.host || oldRoom.host === ZERO_ADDR) return res.status(404).json({ error: 'Old room not found' });
+      if (oldRoom.host.toLowerCase() !== String(hostAddress).toLowerCase()) {
+        return res.status(403).json({ error: 'Only the old room host can send a rematch invite' });
+      }
+
+      // Verify the new room actually exists and has the same host.
+      let newRoom: any = null;
+      for (let i = 0; i < 5; i++) {
+        try {
+          newRoom = await getRoom(BigInt(newRoomId), chainId ? Number(chainId) : undefined);
+          if (newRoom?.host && newRoom.host !== ZERO_ADDR) break;
+        } catch (e: any) {
+          logger.warn({ newRoomId, err: e.message }, `[rematch-invite] New room lookup failed (attempt ${i + 1})`);
+        }
+        await new Promise(r => setTimeout(r, 800 * (i + 1)));
+      }
+      if (!newRoom?.host || newRoom.host === ZERO_ADDR) return res.status(404).json({ error: 'New room not found on-chain' });
+      if (newRoom.host.toLowerCase() !== String(hostAddress).toLowerCase()) {
+        return res.status(403).json({ error: 'New room host mismatch' });
+      }
+
+      const effectiveChainId = chainId ? Number(chainId) : somniaTestnet.id;
+      wsManager.broadcastToRoom(String(oldRoomId), effectiveChainId, {
+        type: 'rematch-invite',
+        data: {
+          oldRoomId: String(oldRoomId),
+          newRoomId: String(newRoomId),
+          hostAddress: String(hostAddress).toLowerCase(),
+          lobbyName: String(lobbyName || newRoom.name || ''),
+          maxPlayers: Number(maxPlayers || newRoom.maxPlayers || 10),
+          isPrivate: Boolean(isPrivate ?? newRoom.isPrivate),
+          chainId: effectiveChainId,
+        },
+      });
+
+      logger.info({ oldRoomId, newRoomId, host: hostAddress, chainId: effectiveChainId }, '[rematch-invite] Broadcasted rematch invite');
+      return res.json({ success: true });
+    } catch (err: any) {
+      logger.error({ err, oldRoomId: req.body?.oldRoomId }, '[rematch-invite] Internal error');
       return res.status(500).json({ error: err.message });
     }
   });

@@ -40,6 +40,7 @@ export interface ServerEvent {
     | 'roles-revealed'
     | 'mafia-chat'
     | 'game-signal'
+    | 'rematch-invite'
     | 'pong'
     | 'joined'
     | 'error';
