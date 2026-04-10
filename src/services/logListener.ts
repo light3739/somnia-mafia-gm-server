@@ -52,7 +52,6 @@ export class LogListener {
 
   static start() {
     this.listenOnChain(somniaTestnet.id);
-    this.listenOnChain(somniaTestnet.id);
   }
 
   private static listenOnChain(chainId: number) {
