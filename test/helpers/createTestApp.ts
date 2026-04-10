@@ -12,6 +12,7 @@ import { createAvatarRoutes } from '../../src/routes/avatarRoutes.js';
 import { createSessionRoutes } from '../../src/routes/sessionRoutes.js';
 import { createDiscussionRoutes } from '../../src/routes/discussionRoutes.js';
 import { createRoomRoutes } from '../../src/routes/roomRoutes.js';
+import { createWinRoutes } from '../../src/routes/winRoutes.js';
 import { Role } from '../../src/types/contract.js';
 
 // No-op rate limiter for tests
@@ -65,6 +66,7 @@ export function createTestApp(options: TestAppOptions = {}) {
   app.use(createSessionRoutes(routesCtx as any));
   app.use(createDiscussionRoutes(routesCtx as any));
   app.use(createRoomRoutes(routesCtx as any));
+  app.use(createWinRoutes(routesCtx as any));
 
   return { app, store };
 }
