@@ -183,6 +183,13 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       });
       if (!sigCheck.ok) return res.status(sigCheck.status).json({ error: sigCheck.error });
 
+      // Phase gate: only allow during NIGHT or after game ENDED
+      const room = await getRoom(BigInt(roomId), Number(chainId));
+      const phase = Number(room.phase);
+      if (phase !== GamePhase.NIGHT && phase !== GamePhase.ENDED) {
+        return res.status(403).json({ error: 'Only available during NIGHT phase or after game ends' });
+      }
+
       const roomKey = store.getRoomKey(Number(chainId), roomId);
       const roles = store.resolvedRoles.get(roomKey);
       if (!roles) return res.status(202).json({ pending: true, message: 'Roles not resolved yet' });

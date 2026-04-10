@@ -51,15 +51,11 @@ export function createAuthService(ctx: AuthContext) {
           return { ok: false, error: 'Timestamp expired or too far in future (max ±60s)', status: 401 };
         }
 
-        // Derive scope from the signed message action (e.g. "night:50312:42:..." → "night")
-        // This prevents cross-action nonce reuse without changing any callers.
+        // Build messages first, then verify BEFORE consuming nonce.
+        // This prevents attackers from burning nonces with invalid signatures.
         const modernMsg = buildModernMessage(nonce, tsNum);
         const derivedAction = modernMsg.split(':')[0] || 'default';
         const scope = params.nonceScope || derivedAction;
-        const isFirstTime = await ServerStore.consumeReplayNonce(scope, roomId, normalizedSigner, nonce, undefined, chainId);
-        if (!isFirstTime) {
-          return { ok: false, error: 'Nonce already used (potential replay)', status: 401 };
-        }
 
         const legacy = buildLegacyMessage();
         const modern = buildModernMessage(nonce, tsNum);
@@ -87,10 +83,18 @@ export function createAuthService(ctx: AuthContext) {
             logger.error({ err: e }, '[AUTH] Sig recovery failed');
           }
         }
+
+        // Consume nonce ONLY after signature is verified valid
+        if (valid) {
+          const isFirstTime = await ServerStore.consumeReplayNonce(scope, roomId, normalizedSigner, nonce, undefined, chainId);
+          if (!isFirstTime) {
+            return { ok: false, error: 'Nonce already used (potential replay)', status: 401 };
+          }
+        }
       }
     }
 
-    // 2. Legacy fallback
+    // 2. Legacy fallback (no nonce needed — old clients)
     if (!valid) {
       valid = await verifyMessage({
         address: normalizedPlayer as Address,

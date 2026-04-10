@@ -41,7 +41,7 @@ if (!redis && process.env.NODE_ENV === 'production') {
  * Global expiration for game data (24 hours)
  */
 const GAME_DATA_TTL = 86400;
-const REPLAY_NONCE_TTL_SECONDS = 180;
+const REPLAY_NONCE_TTL_SECONDS = 300; // 5 min — accommodates slow mobile networks
 
 export interface PlayerSecret {
     role: number;

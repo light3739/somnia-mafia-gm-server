@@ -25,6 +25,8 @@ import { wsManager } from '../ws/wsManager.js';
 const NIGHT_TIMEOUT_MS = Number(process.env.NIGHT_TIMEOUT_MS ?? 60_000);
 const nightTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export const nightChainIds = new Map<string, number | undefined>();
+// Mutex to prevent concurrent doResolveNight calls for the same room
+const resolveLocks = new Set<string>();
 
 function clearNightTimer(roomKey: string): void {
   const t = nightTimers.get(roomKey);
@@ -33,8 +35,18 @@ function clearNightTimer(roomKey: string): void {
 
 export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): Promise<void> {
   const roomIdStr = String(rid);
-  let state = getNightState(rid);
   const effectiveChainId = Number(chainId) || 50312;
+
+  // Acquire per-room lock to prevent concurrent resolve calls (TOCTOU race)
+  const lockKey = `${effectiveChainId}:${roomIdStr}`;
+  if (resolveLocks.has(lockKey)) {
+    logger.info({ roomId: roomIdStr }, '[doResolveNight] Already resolving (lock held), skipping');
+    return;
+  }
+  resolveLocks.add(lockKey);
+
+  try {
+  let state = getNightState(rid);
 
   logger.info({ roomId: roomIdStr, hasState: !!state, isResolved: state?.resolved }, '[doResolveNight] Attempting to resolve night');
   
@@ -123,6 +135,9 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
   }
   clearNightState(rid);
   if (redis) rDeleteNightState(redis, effectiveChainId, roomIdStr);
+  } finally {
+    resolveLocks.delete(lockKey);
+  }
 }
 
 export function scheduleNightTimeout(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): void {
