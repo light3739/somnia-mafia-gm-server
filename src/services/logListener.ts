@@ -1,4 +1,4 @@
-import { DIAMOND_ABI, getChainConfig, somniaTestnet } from '../chain.js';
+import { DIAMOND_ABI, getChainConfig, somniaTestnet, reportRoomGasCost } from '../chain.js';
 import { ServerStore, type GameLogEntry } from './serverStore.js';
 import { logger } from '../utils/logger.js';
 import { wsManager } from '../ws/wsManager.js';
@@ -212,9 +212,6 @@ export class LogListener {
         const winCondition = (args.winCondition as string) || '';
         const lower = winCondition.toLowerCase();
         if (lower.includes('aborted')) {
-          // Pre-DAY abort: LibGame.abortPreGame ended the room before DAY,
-          // every player (including the one who ghosted) got their buy-in
-          // + deposit refunded in full.
           message = 'Game aborted before start — everyone refunded (deposit + buy-in).';
           type = 'warning';
         } else {
@@ -222,6 +219,12 @@ export class LogListener {
           message = `Game Over! ${winner} wins! (${winCondition})`;
           type = 'success';
         }
+        // Report GM gas costs immediately so drainSessionGas can deduct
+        // the GM share. Fire-and-forget — if it fails or was already
+        // reported via reveal-roles, the contract guard handles it.
+        reportRoomGasCost(BigInt(roomId), chainId).catch((e: any) =>
+          logger.warn({ err: e.message, roomId }, '[LogListener] reportRoomGasCost on GameEnded failed (may already be reported)')
+        );
         break;
       }
 
