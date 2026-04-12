@@ -1,0 +1,23 @@
+# Gitleaks config — shared across all sub-repos
+# Catches private keys, API tokens, and other secrets
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "ethereum-private-key"
+description = "Ethereum/EVM private key (64 hex chars)"
+regex = '''(?i)(private.?key|secret.?key|owner.?pk|host.?pk|player.?pk|account)\s*[:=]\s*['"]?0x[0-9a-fA-F]{64}['"]?'''
+tags = ["key", "ethereum"]
+
+[[rules]]
+id = "raw-hex-private-key"
+description = "Raw 0x-prefixed 64-char hex string assigned to variable"
+regex = '''[:=]\s*['"]0x[0-9a-fA-F]{64}['"]'''
+tags = ["key", "ethereum"]
+[rules.allowlist]
+regexes = [
+    '''0x[0]{64}''',
+    '''REDACTED''',
+    '''YOUR_.*_HERE''',
+]
