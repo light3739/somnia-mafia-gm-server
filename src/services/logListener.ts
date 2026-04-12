@@ -266,7 +266,9 @@ export class LogListener {
 
     if (message) {
       const logEntry: GameLogEntry = { id: entryId, message, type, timestamp, eventType, eventData };
-      await ServerStore.addGameLog(roomId, logEntry, chainId);
+      const isNew = await ServerStore.addGameLog(roomId, logEntry, chainId);
+
+      if (!isNew) return; // Duplicate event (re-poll / subscription re-delivery) — skip all broadcasts
 
       // Push log to all WS clients in this room
       wsManager.broadcastToRoom(roomId, chainId, { type: 'log', data: logEntry });

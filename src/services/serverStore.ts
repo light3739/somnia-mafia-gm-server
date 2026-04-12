@@ -533,8 +533,9 @@ export class ServerStore {
 
     /**
      * Add a log entry for a room.
+     * Returns true if the log was actually added (new), false if deduplicated.
      */
-    static async addGameLog(roomId: string, log: GameLogEntry, chainId?: number | string) {
+    static async addGameLog(roomId: string, log: GameLogEntry, chainId?: number | string): Promise<boolean> {
         const normalizedRoomId = BigInt(roomId).toString();
         const cid = chainId || '50312';
         const key = `room:logs:${cid}:${normalizedRoomId}`;
@@ -542,20 +543,22 @@ export class ServerStore {
         const logs = await this.getGameLogs(roomId, chainId);
 
         // Prevent duplicate logs (especially from event re-polls)
-        if (logs.some(l => l.id === log.id)) return;
+        if (logs.some(l => l.id === log.id)) return false;
 
         logs.push(log);
 
         if (!redis) {
             if (!memoryStore[key]) memoryStore[key] = {};
             memoryStore[key]['list'] = JSON.stringify(logs);
-            return;
+            return true;
         }
 
         try {
             await redis.set(key, JSON.stringify(logs), 'EX', GAME_DATA_TTL);
+            return true;
         } catch (e) {
             logger.error({ err: e }, "[ServerStore] Redis error (addGameLog)");
+            return false;
         }
     }
 }
