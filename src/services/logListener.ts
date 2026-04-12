@@ -130,7 +130,17 @@ export class LogListener {
         message = `${voterName} voted for ${targetName}`;
         type = 'info';
         eventType = 'PLAYER_VOTED';
-        eventData = { playerName: voterName, targetName };
+        // Include raw addresses so the client can resolve nicknames against
+        // live state instead of fragile name matching. Nickname resolution on
+        // this side can fall back to "0xabc..." when the PlayerJoined cache
+        // misses, and that stale text would otherwise end up as the only
+        // identifier in downstream UI (voter avatars, elimination ceremony).
+        eventData = {
+          playerName: voterName,
+          targetName,
+          voterAddress: (args.voter as string).toLowerCase(),
+          targetAddress: (args.target as string).toLowerCase(),
+        };
         break;
       }
 
@@ -143,7 +153,11 @@ export class LogListener {
           const elimName = resolveNickname(chainId, roomId, args.eliminated);
           message = `Voting Finalized: ${elimName} was eliminated!`;
           type = 'danger';
-          eventData = { isEliminated: true, playerName: elimName };
+          eventData = {
+            isEliminated: true,
+            playerName: elimName,
+            playerAddress: (args.eliminated as string).toLowerCase(),
+          };
         }
         eventType = 'VOTING_RESULT';
         break;
@@ -170,7 +184,11 @@ export class LogListener {
           } else {
             message = `Night Result: ${killedName} was killed by Mafia!`;
             type = 'danger';
-            eventData = { isEliminated: true, playerName: killedName };
+            eventData = {
+              isEliminated: true,
+              playerName: killedName,
+              playerAddress: (args.killed as string).toLowerCase(),
+            };
           }
         }
         eventType = 'NIGHT_RESULT';
@@ -192,7 +210,11 @@ export class LogListener {
           const killedName = resolveNickname(chainId, roomId, killedAddr);
           message = `Night Result: ${killedName} was killed by Mafia!`;
           type = 'danger';
-          eventData = { isEliminated: true, playerName: killedName };
+          eventData = {
+            isEliminated: true,
+            playerName: killedName,
+            playerAddress: killedAddr.toLowerCase(),
+          };
         }
         eventType = 'NIGHT_RESULT';
         break;
