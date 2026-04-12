@@ -36,14 +36,14 @@ export const somniaTestnet = defineChain({
 export const somniaMainnet = defineChain({
   id: 5031,
   name: 'Somnia',
-  nativeCurrency: { name: 'STT', symbol: 'STT', decimals: 18 },
+  nativeCurrency: { name: 'Somnia Token', symbol: 'SOMI', decimals: 18 },
   rpcUrls: {
     default: {
       http: [process.env.SOMNIA_MAINNET_RPC_URL || 'https://api.infra.mainnet.somnia.network/'],
       webSocket: [process.env.SOMNIA_MAINNET_WS_URL || 'wss://api.infra.mainnet.somnia.network/ws'],
     },
   },
-  blockExplorers: { default: { name: 'Somnia Explorer', url: 'https://somnia.socialscan.io' } },
+  blockExplorers: { default: { name: 'Somnia Explorer', url: 'https://explorer.somnia.network' } },
   testnet: false,
 });
 
