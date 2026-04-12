@@ -62,11 +62,13 @@ export class LogListener {
     const unwatch = client.watchContractEvent({
       address: diamond,
       abi: DIAMOND_ABI,
-      onLogs: (logs: any[]) => {
+      onLogs: async (logs: any[]) => {
         for (const log of logs) {
-          this.handleEvent(chainId, log).catch(err => {
+          try {
+            await this.handleEvent(chainId, log);
+          } catch (err) {
             logger.error({ err }, `[LogListener] Error handling event ${log.eventName}`);
-          });
+          }
         }
       }
     });

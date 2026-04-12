@@ -196,10 +196,16 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
         const currentSpeaker = alivePlayers[state.currentSpeakerIndex];
         const isSpeaker = currentSpeaker?.wallet.toLowerCase() === String(playerAddress).toLowerCase();
         let isHost = false;
-        try {
-          const room = await getRoom(rid, Number(chainId || 50312));
-          isHost = (room.host as string).toLowerCase() === String(playerAddress).toLowerCase();
-        } catch { /* ignore — host check is best-effort */ }
+        const effectiveChainId = Number(chainId || 50312);
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const room = await getRoom(rid, effectiveChainId);
+            isHost = (room.host as string).toLowerCase() === String(playerAddress).toLowerCase();
+            break;
+          } catch (err) {
+            logger.warn({ err: (err as any)?.message, roomId, playerAddress, attempt }, '[discussion] getRoom RPC failed during host check');
+          }
+        }
         if (!isSpeaker && !isHost) return res.status(403).json({ error: 'Only current speaker or host can skip' });
 
         const newState = await ServerStore.advanceSpeaker(String(roomId), Number(dayCount || 1), totalSpeakers, true, Number(chainId || 50312));
