@@ -33,6 +33,20 @@ export const somniaTestnet = defineChain({
   testnet: true,
 });
 
+export const somniaMainnet = defineChain({
+  id: 5031,
+  name: 'Somnia',
+  nativeCurrency: { name: 'STT', symbol: 'STT', decimals: 18 },
+  rpcUrls: {
+    default: {
+      http: [process.env.SOMNIA_MAINNET_RPC_URL || 'https://api.infra.mainnet.somnia.network/'],
+      webSocket: [process.env.SOMNIA_MAINNET_WS_URL || 'wss://api.infra.mainnet.somnia.network/ws'],
+    },
+  },
+  blockExplorers: { default: { name: 'Somnia Explorer', url: 'https://somnia.socialscan.io' } },
+  testnet: false,
+});
+
 import { logger } from './utils/logger.js';
 
 if (!process.env.GM_PRIVATE_KEY) {
@@ -44,6 +58,7 @@ logger.info(`[chain] GM Service initialized with address: ${GM_ADDRESS}`);
 
 const AVAX_DIAMOND = (process.env.AVAX_DIAMOND || '0x9f11a8c79d9c59071b4f64f40b0a35cb56645149') as Address;
 const SOMNIA_DIAMOND = (process.env.SOMNIA_DIAMOND || '0x0406a14729b0c77c187ac5229c8c2317589e73c0') as Address;
+const SOMNIA_MAINNET_DIAMOND = (process.env.SOMNIA_MAINNET_DIAMOND || '') as Address;
 
 interface ChainConfig {
   public: any; // using any here to simplify client types, will be narrowed by readContract
@@ -72,11 +87,36 @@ const chainsConfig: Record<number, ChainConfig> = {
     }),
     wallet: createWalletClient({ account: gmAccount, chain: somniaTestnet, transport: http(somniaTestnet.rpcUrls.default.http[0]) }),
     diamond: SOMNIA_DIAMOND
-  }
+  },
 };
 
+if (SOMNIA_MAINNET_DIAMOND) {
+  chainsConfig[somniaMainnet.id] = {
+    public: createPublicClient({
+      chain: somniaMainnet,
+      transport: fallback([
+        webSocket(somniaMainnet.rpcUrls.default.webSocket![0], {
+          reconnect: { delay: 2_000, attempts: 10 },
+          keepAlive: { interval: 25_000 },
+        }),
+        http(somniaMainnet.rpcUrls.default.http[0]),
+      ]),
+    }),
+    wallet: createWalletClient({ account: gmAccount, chain: somniaMainnet, transport: http(somniaMainnet.rpcUrls.default.http[0]) }),
+    diamond: SOMNIA_MAINNET_DIAMOND,
+  };
+  logger.info(`[chain] Somnia Mainnet (5031) configured with diamond: ${SOMNIA_MAINNET_DIAMOND}`);
+}
+
+const DEFAULT_CHAIN_ID = Number(process.env.DEFAULT_CHAIN_ID) || somniaTestnet.id;
+
 export function getChainConfig(chainId?: number): ChainConfig {
-  return chainsConfig[Number(chainId)] || chainsConfig[somniaTestnet.id];
+  const resolved = chainId != null ? Number(chainId) : DEFAULT_CHAIN_ID;
+  const config = chainsConfig[resolved];
+  if (!config) {
+    throw new Error(`Unsupported chainId: ${chainId}. Configured chains: ${Object.keys(chainsConfig).join(', ')}`);
+  }
+  return config;
 }
 
 // ─── Contract Helpers ─────────────────────────────────────
@@ -255,7 +295,7 @@ export async function reportRoomGasCost(roomId: bigint, chainId?: number) {
 }
 
 export async function assertChainConfigOrThrow() {
-  for (const cid of [somniaTestnet.id]) {
+  for (const cid of Object.keys(chainsConfig).map(Number)) {
     const { public: client } = getChainConfig(cid);
     try {
       const rpcChainId = await client.getChainId();
