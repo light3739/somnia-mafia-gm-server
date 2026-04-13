@@ -128,7 +128,7 @@ export function createAuthService(ctx: AuthContext) {
         } catch { /* log fallback silently */ }
       }
 
-      if (cached && cached.sessionAddress === normalizedSigner && BigInt(cached.roomId) === requestedRoomIdBI && cached.chainId === effectiveChainId) {
+      if (cached && cached.sessionAddress === normalizedSigner && cached.roomId != null && BigInt(cached.roomId) === requestedRoomIdBI && cached.chainId === effectiveChainId) {
         return { ok: true, signer: normalizedSigner };
       }
 

@@ -271,7 +271,7 @@ class WsManager {
               const isExpired = expiresAt > 0 && expiresAt < Math.floor(Date.now() / 1000);
 
               if (sessionAddr === expectedSigner && isActive && !isExpired) {
-                cached = { sessionAddress: expectedSigner };
+                cached = { sessionAddress: expectedSigner, roomId: String(roomId), chainId: Number(chainId) };
                 this.sessionCache?.set(cacheKey, cached);
                 // Also persist to Redis for faster future lookups
                 try {
