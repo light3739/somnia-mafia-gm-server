@@ -228,7 +228,33 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
     }
 
     const roomKey = store.getRoomKey(effectiveCid, req.params.roomId);
-    const cached = store.resolvedRoles.get(roomKey);
+    let cached = store.resolvedRoles.get(roomKey);
+
+    // Fallback: restore roles from Redis if memory is empty (e.g. after server restart)
+    if (!cached || cached.size === 0) {
+      try {
+        const pattern = `gm:room:${effectiveCid}:${req.params.roomId}:role:*`;
+        const keys = redis ? await redis.keys(pattern) : [];
+        if (keys.length > 0) {
+          const vals = redis ? await redis.mget(keys) : [];
+          const restoredRoles = new Map<string, number>();
+          for (let i = 0; i < keys.length; i++) {
+            if (vals[i]) {
+              const addr = keys[i].split(':')[5];
+              restoredRoles.set(addr, Number(vals[i]));
+            }
+          }
+          if (restoredRoles.size > 0) {
+            store.resolvedRoles.set(roomKey, restoredRoles as any);
+            cached = restoredRoles as any;
+            logger.info({ roomId: req.params.roomId, count: restoredRoles.size }, '[room-roles] Restored roles from Redis');
+          }
+        }
+      } catch (err: any) {
+        logger.error({ err: err.message }, '[room-roles] Redis fallback failed');
+      }
+    }
+
     if (!cached) return res.status(202).json({ pending: true });
 
     const result: Record<string, string> = {};
