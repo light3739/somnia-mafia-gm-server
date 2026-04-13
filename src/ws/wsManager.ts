@@ -79,7 +79,7 @@ class WsManager {
   private meta = new WeakMap<WebSocket, SocketMeta>();
 
   /** Session cache reference for verifying session key ownership on WS join */
-  private sessionCache: Map<string, { sessionAddress: string }> | null = null;
+  private sessionCache: Map<string, { sessionAddress: string; roomId: string | number; chainId: number }> | null = null;
 
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -89,7 +89,7 @@ class WsManager {
    * Provide session cache so WS auth can resolve session keys.
    * Called once at startup from index.ts.
    */
-  setSessionCache(cache: Map<string, { sessionAddress: string }>) {
+  setSessionCache(cache: Map<string, { sessionAddress: string; roomId: string | number; chainId: number }>) {
     this.sessionCache = cache;
   }
 
