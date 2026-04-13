@@ -6,8 +6,10 @@
  */
 import { WebSocket, WebSocketServer } from 'ws';
 import type { IncomingMessage } from 'http';
-import { verifyMessage } from 'viem';
+import { verifyMessage, type Address } from 'viem';
 import { logger } from '../utils/logger.js';
+import { getSessionKey } from '../chain.js';
+import { getRedis } from '../redis.js';
 
 // ── Event protocol ──────────────────────────────────────────────────────────
 
@@ -232,10 +234,63 @@ class WsManager {
           return;
         }
 
-        // If signer differs from player, verify it's a valid session key
+        // If signer differs from player, verify it's a valid session key.
+        // Check: local cache → Redis → on-chain (same fallback chain as
+        // verifySignature). The /register-session HTTP call was removed from
+        // the client to avoid a double MetaMask popup, so the cache is often
+        // empty on first WS connect. Without the fallback the first join
+        // always got 4001 and cost 5-15s of WS downtime.
         if (expectedSigner !== playerAddress.toLowerCase()) {
           const cacheKey = `${chainId}:${playerAddress.toLowerCase()}`;
-          const cached = this.sessionCache?.get(cacheKey);
+          let cached = this.sessionCache?.get(cacheKey);
+
+          // Redis fallback
+          if (!cached || cached.sessionAddress.toLowerCase() !== expectedSigner) {
+            try {
+              const redis = getRedis();
+              if (redis) {
+                const stored = await redis.get(`gm:session:${cacheKey}`);
+                if (stored) {
+                  const parsed = JSON.parse(stored);
+                  if (parsed?.sessionAddress?.toLowerCase() === expectedSigner) {
+                    cached = parsed;
+                    this.sessionCache?.set(cacheKey, cached!);
+                  }
+                }
+              }
+            } catch { /* Redis unavailable — continue to on-chain */ }
+          }
+
+          // On-chain fallback (single attempt — WS join should be fast)
+          if (!cached || cached.sessionAddress.toLowerCase() !== expectedSigner) {
+            try {
+              const session = await getSessionKey(playerAddress.toLowerCase() as Address, Number(chainId)) as any;
+              const sessionAddr = String(session.sessionAddress || '').toLowerCase();
+              const isActive = Boolean(session.isActive);
+              const expiresAt = Number(session.expiresAt || 0);
+              const isExpired = expiresAt > 0 && expiresAt < Math.floor(Date.now() / 1000);
+
+              if (sessionAddr === expectedSigner && isActive && !isExpired) {
+                cached = { sessionAddress: expectedSigner };
+                this.sessionCache?.set(cacheKey, cached);
+                // Also persist to Redis for faster future lookups
+                try {
+                  const redis = getRedis();
+                  if (redis) {
+                    await redis.set(`gm:session:${cacheKey}`, JSON.stringify({
+                      sessionAddress: expectedSigner,
+                      roomId: String(roomId),
+                      chainId: Number(chainId),
+                    }), 'EX', 86400);
+                  }
+                } catch { /* non-critical */ }
+                logger.info({ cacheKey, sessionAddress: expectedSigner }, '[WS] Session key verified on-chain and cached');
+              }
+            } catch (e) {
+              logger.warn({ err: e, cacheKey }, '[WS] On-chain session key check failed');
+            }
+          }
+
           if (!cached || cached.sessionAddress.toLowerCase() !== expectedSigner) {
             this.send(ws, { type: 'error', data: 'Session key not recognized' });
             ws.close(4001, 'Unauthorized');
