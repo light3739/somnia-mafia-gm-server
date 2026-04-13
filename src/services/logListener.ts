@@ -284,6 +284,28 @@ export class LogListener {
         break;
       }
 
+      case 'PrizeDistributed': {
+        const winnerAddr = args.winner as string | undefined;
+        const amount = BigInt(args.amount || 0);
+        const winnerName = winnerAddr ? resolveNickname(chainId, roomId, winnerAddr) : 'Unknown';
+        const symbol = chainId === somniaMainnet.id ? 'SOMI' : 'STT';
+        message = `Prize distributed: ${winnerName} received ${formatEther(amount)} ${symbol}`;
+        type = 'success';
+        eventData = {
+          playerAddress: winnerAddr?.toLowerCase(),
+          playerName: winnerName,
+          amount: amount.toString(),
+          txHash: transactionHash,
+        };
+        // Broadcast tx hash so ALL players can show the explorer link
+        // (only the distributing player has it in localStorage otherwise)
+        wsManager.broadcastToRoom(roomId, chainId, {
+          type: 'prize-distributed',
+          data: { txHash: transactionHash, roomId },
+        });
+        break;
+      }
+
       case 'RoomReturnedToLobby':
         // Legacy event — the old kickAfkAndReturnToLobby path rewound the
         // room back to LOBBY on pre-DAY timeout. The new abortPreGame model
