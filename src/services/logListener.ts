@@ -1,4 +1,4 @@
-import { DIAMOND_ABI, getChainConfig, somniaTestnet, reportRoomGasCost } from '../chain.js';
+import { DIAMOND_ABI, getChainConfig, somniaTestnet, somniaMainnet, reportRoomGasCost } from '../chain.js';
 import { ServerStore, type GameLogEntry } from './serverStore.js';
 import { logger } from '../utils/logger.js';
 import { wsManager } from '../ws/wsManager.js';
@@ -52,6 +52,11 @@ export class LogListener {
 
   static start() {
     this.listenOnChain(somniaTestnet.id);
+    try {
+      this.listenOnChain(somniaMainnet.id);
+    } catch (e) {
+      logger.warn('[LogListener] Somnia Mainnet (5031) not configured, skipping');
+    }
   }
 
   private static listenOnChain(chainId: number) {
