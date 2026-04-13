@@ -2,6 +2,7 @@ import { DIAMOND_ABI, getChainConfig, somniaTestnet, somniaMainnet, reportRoomGa
 import { ServerStore, type GameLogEntry } from './serverStore.js';
 import { logger } from '../utils/logger.js';
 import { wsManager } from '../ws/wsManager.js';
+import { formatEther } from 'viem';
 
 // Nickname cache: chainId -> roomId -> address -> nickname
 // Populated from PlayerJoined events so we can resolve names in later events.
@@ -83,6 +84,7 @@ export class LogListener {
 
   private static async handleEvent(chainId: number, log: any) {
     const { eventName, args, transactionHash } = log;
+    if (!args || !eventName) return; // Skip events the ABI can't decode
     const roomId = args.roomId?.toString();
     if (!roomId) return;
 
@@ -254,6 +256,31 @@ export class LogListener {
         reportRoomGasCost(BigInt(roomId), chainId).catch((e: any) =>
           logger.warn({ err: e.message, roomId }, '[LogListener] reportRoomGasCost on GameEnded failed (may already be reported)')
         );
+        break;
+      }
+
+      case 'GmGasCostReported': {
+        const amount = BigInt(args.amount || 0);
+        message = `GM gas cost reported: ${formatEther(amount)} ${chainId === somniaMainnet.id ? 'SOMI' : 'STT'}`;
+        type = 'info';
+        eventData = { amount: amount.toString() };
+        break;
+      }
+
+      case 'SessionGasDrained': {
+        const playerAddr = args.player as string | undefined;
+        const gmShare = BigInt(args.gmShare || 0);
+        const playerRefund = BigInt(args.playerRefund || 0);
+        const playerName = playerAddr ? resolveNickname(chainId, roomId, playerAddr) : 'Unknown';
+        const symbol = chainId === somniaMainnet.id ? 'SOMI' : 'STT';
+        message = `Session gas refunded for ${playerName}: ${formatEther(playerRefund)} ${symbol} returned, ${formatEther(gmShare)} ${symbol} GM fee`;
+        type = 'info';
+        eventData = {
+          playerAddress: playerAddr?.toLowerCase(),
+          playerName,
+          gmShare: gmShare.toString(),
+          playerRefund: playerRefund.toString(),
+        };
         break;
       }
 

@@ -2413,5 +2413,25 @@ export const DIAMOND_ABI = [
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "uint256", "name": "roomId", "type": "uint256" },
+      { "indexed": false, "internalType": "uint128", "name": "amount", "type": "uint128" }
+    ],
+    "name": "GmGasCostReported",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "internalType": "uint256", "name": "roomId", "type": "uint256" },
+      { "indexed": true, "internalType": "address", "name": "player", "type": "address" },
+      { "indexed": false, "internalType": "uint128", "name": "gmShare", "type": "uint128" },
+      { "indexed": false, "internalType": "uint128", "name": "playerRefund", "type": "uint128" }
+    ],
+    "name": "SessionGasDrained",
+    "type": "event"
   }
 ] as const;
