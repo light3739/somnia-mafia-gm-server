@@ -287,12 +287,12 @@ export async function reportRoomGasCost(roomId: bigint, chainId?: number) {
   // Estimate reportRoomGasCost TX cost and add 10% buffer so GM isn't out of pocket
   let reportTxCost = 0n;
   try {
-    const gasPrice = await publicClient.getGasPrice();
-    const gasEst = await publicClient.estimateGas({
+    const gasPrice = BigInt(await publicClient.getGasPrice());
+    const gasEst = BigInt(await publicClient.estimateGas({
       account: client.account!.address,
       to: diamond,
       data: '0x', // rough estimate
-    }).catch(() => 100000n);
+    }).catch(() => 100000n));
     reportTxCost = gasEst * gasPrice;
   } catch { /* non-critical */ }
 
