@@ -270,28 +270,70 @@ export async function reportRoomGasCost(roomId: bigint, chainId?: number) {
   }
 
   const { wallet: client, public: publicClient, diamond } = getChainConfig(chainId);
-  try {
-    const hash = await client.writeContract({
-      address: diamond,
-      abi: DIAMOND_ABI,
-      functionName: 'reportRoomGasCost',
-      args: [roomId, total > 300000000000000000n ? 300000000000000000n : total],
-      chain: null,
-    });
-    logger.info({ roomId: roomId.toString(), hash, amount: total.toString() }, '[gas] reportRoomGasCost tx sent');
 
-    await Promise.race([
-      publicClient.waitForTransactionReceipt({ hash }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('reportRoomGasCost timeout')), 30_000)
-      ),
-    ]);
-    logger.info({ roomId: roomId.toString() }, '[gas] reportRoomGasCost confirmed');
-  } catch (e: any) {
-    logger.error({ err: e.message, roomId: roomId.toString() }, '[gas] reportRoomGasCost failed');
-  } finally {
-    roomGasCosts.delete(key);
+  // Check if already reported on-chain (avoid wasting gas on revert)
+  try {
+    const existing = await publicClient.readContract({
+      address: diamond, abi: DIAMOND_ABI,
+      functionName: 'getGmGasCost', args: [roomId],
+    }) as bigint;
+    if (existing > 0n) {
+      logger.info({ roomId: roomId.toString() }, '[gas] Already reported on-chain, skipping');
+      roomGasCosts.delete(key);
+      return;
+    }
+  } catch { /* getter may not exist on old deployment — proceed */ }
+
+  // Estimate reportRoomGasCost TX cost and add 10% buffer so GM isn't out of pocket
+  let reportTxCost = 0n;
+  try {
+    const gasPrice = await publicClient.getGasPrice();
+    const gasEst = await publicClient.estimateGas({
+      account: client.account!.address,
+      to: diamond,
+      data: '0x', // rough estimate
+    }).catch(() => 100000n);
+    reportTxCost = gasEst * gasPrice;
+  } catch { /* non-critical */ }
+
+  const buffered = total + reportTxCost + (total / 10n); // tracked + report TX cost + 10% buffer
+  const cap = 300000000000000000n; // 0.3 SOMI
+  const amount = buffered > cap ? cap : buffered;
+
+  // Retry up to 3 times
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const hash = await client.writeContract({
+        address: diamond,
+        abi: DIAMOND_ABI,
+        functionName: 'reportRoomGasCost',
+        args: [roomId, amount],
+        chain: null,
+      });
+      logger.info({ roomId: roomId.toString(), hash, amount: amount.toString(), attempt }, '[gas] reportRoomGasCost tx sent');
+
+      await Promise.race([
+        publicClient.waitForTransactionReceipt({ hash }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('reportRoomGasCost timeout')), 30_000)
+        ),
+      ]);
+      logger.info({ roomId: roomId.toString() }, '[gas] reportRoomGasCost confirmed');
+      roomGasCosts.delete(key);
+      return; // success
+    } catch (e: any) {
+      const msg = e.message || '';
+      if (msg.includes('Already reported')) {
+        logger.info({ roomId: roomId.toString() }, '[gas] Already reported (contract guard)');
+        roomGasCosts.delete(key);
+        return;
+      }
+      logger.warn({ err: msg, roomId: roomId.toString(), attempt }, '[gas] reportRoomGasCost attempt failed');
+      if (attempt < 3) await new Promise(r => setTimeout(r, 2000));
+    }
   }
+  logger.error({ roomId: roomId.toString() }, '[gas] reportRoomGasCost failed after 3 attempts');
+  roomGasCosts.delete(key);
 }
 
 export async function assertChainConfigOrThrow() {
