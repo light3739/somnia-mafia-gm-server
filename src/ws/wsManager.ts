@@ -43,6 +43,7 @@ export interface ServerEvent {
     | 'mafia-chat'
     | 'game-signal'
     | 'rematch-invite'
+    | 'prize-distributed'
     | 'pong'
     | 'joined'
     | 'error';
