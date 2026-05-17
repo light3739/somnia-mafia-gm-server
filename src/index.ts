@@ -22,6 +22,7 @@ import { createDiscussionRoutes } from './routes/discussionRoutes.js';
 import { createSessionRoutes } from './routes/sessionRoutes.js';
 import { createAvatarRoutes } from './routes/avatarRoutes.js';
 import { createLogRoutes } from './routes/logRoutes.js';
+import { createAgentRoutes } from './routes/agentRoutes.js';
 import { LogListener } from './services/logListener.js';
 import { startAgentSubsystem } from './agents/index.js';
 
@@ -84,6 +85,15 @@ app.use(createDiscussionRoutes(routesCtx as any));
 app.use(createSessionRoutes(routesCtx as any));
 app.use(createAvatarRoutes(routesCtx as any));
 app.use(createLogRoutes(routesCtx as any));
+// Agent control surface. Gated by AGENTS_ENABLED inside the router; returns
+// 503 when off so unconditional mounting here has no production side-effect.
+// Redis is resolved lazily per request inside the router (route registration
+// happens before connectRedis()).
+app.use(
+  createAgentRoutes({
+    actionLimiter,
+  })
+);
 
 // Lifecycle
 async function start() {

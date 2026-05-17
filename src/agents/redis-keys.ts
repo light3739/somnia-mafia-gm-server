@@ -41,6 +41,25 @@ export function lastBlockKey(chainId: number, diamond: Hex): string {
   return `${NS}:lastBlock:${chainId}:${diamond.toLowerCase()}`;
 }
 
+/**
+ * Private trace store — full inference material kept off-chain until the room
+ * reaches phase ENDED, then revealed via revealAgentInferenceTrace.
+ *
+ * Stored as a JSON blob with {salt, somniaRequestId, promptHash, responseHash,
+ * actionHash, prompt, response, target, llmTxHash, voteTxHash, commitTxHash}.
+ * The `Hash` fields are duplicated for redundancy — agent's reveal payload
+ * only needs the hashes, but the full prompt/response are kept so the
+ * post-game audit endpoint can replay the decision verbatim.
+ */
+export function agentTraceKey(
+  chainId: number,
+  roomId: string,
+  phaseId: string,
+  agent: Hex
+): string {
+  return `${NS}:trace:${chainId}:${roomId}:${phaseId}:${agent.toLowerCase()}`;
+}
+
 /** TTL for idempotency markers — long enough to outlive any reasonable game
  * but short enough that Redis doesn't accumulate forever. 7 days. */
 export const IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 60 * 60;

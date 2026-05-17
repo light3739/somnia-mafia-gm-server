@@ -16,6 +16,7 @@ import type { Redis } from "ioredis";
 import type { Hex } from "viem";
 import { logger } from "../utils/logger.js";
 import type { AgentEvent } from "./events.js";
+import type { VotingHandler, VotingStartedEvent } from "./voting.js";
 import {
   eventProcessedKey,
   lastBlockKey,
@@ -25,6 +26,8 @@ import {
 export type DispatcherDeps = {
   redis: Redis;
   diamondByChain: Map<number, Hex>;
+  /** Optional: when wired, VOTING_STARTED is routed here. Skipped otherwise. */
+  votingHandler?: VotingHandler;
 };
 
 export type DispatchOutcome =
@@ -85,13 +88,29 @@ export class AgentDispatcher {
       "[agents] dispatch (skeleton — no agent action wired yet)"
     );
 
-    // Stubbed phase routing — handlers land in 4b/4d/4f.
+    // Per-phase routing. Handlers run AFTER the event-level claim so a single
+    // log delivery never starts two parallel handler invocations. Errors are
+    // caught here — a failing handler must not leave the event marker absent
+    // (which would re-trigger on the next listener restart), nor crash the
+    // listener (which would stall the entire chain subscription).
     switch (event.type) {
       case "DAY_STARTED":
         // TODO 4d: dispatch DAY chat for each agent in roomId
         break;
       case "VOTING_STARTED":
-        // TODO 4b: dispatch VOTING per agent
+        if (this.deps.votingHandler) {
+          // Fire-and-await: the listener already runs handleRawLog inside its
+          // own try/catch (see listener.ts), so we can let the promise chain
+          // back up and surface any exception via that path.
+          await this.deps.votingHandler
+            .handle(event as VotingStartedEvent)
+            .catch((err) =>
+              logger.error(
+                { err, event: event.type, roomId: event.roomId },
+                "[agents] votingHandler.handle threw"
+              )
+            );
+        }
         break;
       case "NIGHT_STARTED":
         // TODO 4f: dispatch NIGHT per active-role agent

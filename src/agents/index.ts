@@ -15,6 +15,9 @@ import { getChainConfig } from "../chain.js";
 import { logger } from "../utils/logger.js";
 import { AgentDispatcher } from "./dispatcher.js";
 import { AgentEventListener } from "./listener.js";
+import { VotingHandler } from "./voting.js";
+import { makeVoteChainOps } from "./chain-ops.js";
+import { loadOrGenerateMnemonic } from "./wallets.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -67,7 +70,30 @@ export async function startAgentSubsystem(): Promise<void> {
     return;
   }
 
-  const dispatcher = new AgentDispatcher({ redis, diamondByChain });
+  // Build per-chain VoteChainOps once (closures inside cache the viem clients).
+  // VotingHandler is stateless across chains — chainOpsFor dispatches.
+  const chainOpsCache = new Map<number, ReturnType<typeof makeVoteChainOps>>();
+  for (const chainId of diamondByChain.keys()) {
+    chainOpsCache.set(chainId, makeVoteChainOps(chainId));
+  }
+
+  const mnemonic = loadOrGenerateMnemonic();
+  const votingHandler = new VotingHandler({
+    redis,
+    chainOpsFor: (chainId) => {
+      const ops = chainOpsCache.get(chainId);
+      if (!ops) throw new Error(`[agents] no chainOps for chainId ${chainId}`);
+      return ops;
+    },
+    mnemonic,
+    language: process.env.AGENTS_LANGUAGE ?? "English",
+  });
+
+  const dispatcher = new AgentDispatcher({
+    redis,
+    diamondByChain,
+    votingHandler,
+  });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);
   activeListener = listener;
@@ -76,6 +102,7 @@ export async function startAgentSubsystem(): Promise<void> {
     {
       chainIds: [...diamondByChain.keys()],
       diamonds: [...diamondByChain.entries()].map(([cid, d]) => `${cid}=${d}`),
+      handlersWired: ["VOTING_STARTED"],
     },
     "[agents] subsystem started"
   );
