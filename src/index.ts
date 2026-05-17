@@ -23,6 +23,7 @@ import { createSessionRoutes } from './routes/sessionRoutes.js';
 import { createAvatarRoutes } from './routes/avatarRoutes.js';
 import { createLogRoutes } from './routes/logRoutes.js';
 import { LogListener } from './services/logListener.js';
+import { startAgentSubsystem } from './agents/index.js';
 
 import { logger } from './utils/logger.js';
 import { wsManager } from './ws/wsManager.js';
@@ -102,6 +103,9 @@ async function start() {
 
   // Start background log listener
   LogListener.start();
+
+  // Agent subsystem — opt-in via AGENTS_ENABLED=true. No-op otherwise.
+  await startAgentSubsystem();
 
   // HTTP + WebSocket on the same port
   const httpServer = createServer(app);
