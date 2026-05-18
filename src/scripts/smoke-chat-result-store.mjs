@@ -48,10 +48,12 @@ const HANDLE_RESPONSE_SELECTOR = toFunctionSelector(
   "handleResponse(uint256,(address,bytes,uint8,uint256,uint256,uint256)[],uint8,(uint256,address,address,bytes4,address[],(address,bytes,uint8,uint256,uint256,uint256)[],uint256,uint256,uint256,uint256,uint256,uint8,uint8,uint256,uint256))"
 );
 
-const payload = encodeAbiParameters(
+const INFER_CHAT_SELECTOR = toFunctionSelector("inferChat(string[],string[],bool)");
+const payloadArgs = encodeAbiParameters(
   parseAbiParameters("string[], string[], bool"),
   [["system", "user"], ["You are a helpful assistant.", "Say hello in 5 words."], false]
 );
+const payload = (INFER_CHAT_SELECTOR + payloadArgs.slice(2));
 
 const REQUESTER_ABI = parseAbi([
   "function createRequest(uint256 agentId, address callbackAddress, bytes4 callbackSelector, bytes payload) payable returns (uint256)",
