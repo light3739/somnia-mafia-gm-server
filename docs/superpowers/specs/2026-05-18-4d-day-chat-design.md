@@ -18,6 +18,25 @@ re-check immediately before commit tx (F3); split `commitStatus` and
 suspicion update from chain events only — chat extraction deferred to
 Memory Engine Days 8-9 (F6).
 
+**Review fixes (2026-05-18 round 3 — F-new):** five additional findings, all
+locked. (F-new-1) Reject `messageHash == bytes32(0)` in contract via
+`ZeroMessageHash` revert — zero is the dedup sentinel and must not be
+writable. (F-new-2) Remove `somniaRequestId` from WS broadcast payload —
+the corresponding Somnia `RequestCreated` event leaks the prompt
+mid-game per [[agent-role-secrecy]]; keep requestId in private Redis
+trace only until reveal. (F-new-3) On `MessageAlreadyCommitted` revert,
+read `getAgentMessageHash` and distinguish self-retry (stored hash ==
+our hash → success-equivalent) from race conflict (stored != ours → new
+`COMMIT_CONFLICT` status, no chat/WS mutation). (F-new-4) Reorder
+lifecycle: compute hashes → F3 phase recheck → persist appropriate
+state → tx. Avoids stale `PENDING_COMMIT` write when phase advances.
+(F-new-5) Update chain event ID sources: `NightResolvedByGM` and
+`NightFinalized` from `LibGame.sol:115,127` — there is no `NightEnded`
+event. **Minor:** `scrubResult.outcome` enum (`ALLOWED |
+BLOCKED_ROLE_LEAK | EMPTY_RESPONSE`) replaces ambiguous
+`scrubAllowed=true` on empty response; the boolean bound into
+`messageHash` derives as `outcome === "ALLOWED"`.
+
 **Position in master plan:** Day 6 deliverable in the 22-day Agentathon track.
 Follows 4f NIGHT (done) and 4b VOTING (done). Pre-reqs all met.
 
@@ -80,15 +99,18 @@ DAY_STARTED event (chain listener → AgentEventBus)
         else:
           msgKind = MSG
           sanitizedTextHash = messageTextHash(sanitized)
+        # Compute all hashes BEFORE any state persist or phase recheck (F-new-4 order fix)
         salt = randomSalt()
         rawResponseHash = keccak(toHex(rawText))
-        promptHash = keccak(canonical encode of (roles[], messages[]))
+        promptHash = canonicalPromptHash(roles, messages)   # keccak of (string[], string[])
+        sanitizedTextHash = msgKind == MSG ? messageTextHash(sanitized) : ZERO_BYTES32
         messageHash = computeMessageHash(F2-full preimage — see Section 2)
-        persist trace with commitStatus=PENDING_COMMIT (includes all provenance fields)
-        # F3: second phase re-check immediately before tx
+        # F3: second phase re-check BEFORE persisting PENDING_COMMIT (F-new-4 fix)
         recheckPhase = chain.getRoom(roomId).phase
         if recheckPhase != PHASE_DAY:
-          commitStatus=PHASE_ADVANCED, no commit, no broadcast, return
+          persist trace { commitStatus=PHASE_ADVANCED, msgKind, all material — kept for debug }
+          return  # no tx, no broadcast
+        persist trace with commitStatus=PENDING_COMMIT (includes all provenance fields)
         send commitAgentMessageV2(roomId, phaseId, messageHash) from agent EOA
         waitForReceiptOrRevert
         on success:
@@ -98,8 +120,19 @@ DAY_STARTED event (chain listener → AgentEventBus)
             redis.rpush(agentChatPromptKey) + LTRIM last 20
             redis.rpush(agentChatLogKey)
             # F6: NO chat-event extraction in v1. Suspicion/ledger only update from chain events elsewhere.
+            # F-new-2: somniaRequestId MUST NOT appear in WS payload — public chain has the corresponding
+            # RequestCreated event with prompt payload, revealing requestId mid-game = role leak.
             wsManager.broadcastToRoom(roomId, chainId, {type:"agent-chat", by, text, persona, day, messageHash, commitTxHash})
-        on commit revert:
+        on commit revert with MessageAlreadyCommitted (F-new-3):
+          stored = chain.getAgentMessageHash(roomId, phaseId, agent)
+          if stored == messageHash:
+            commitStatus=COMMITTED   # idempotent retry of OUR own commit (e.g., post-restart)
+            (proceed with all on-success side effects)
+          else:
+            commitStatus=COMMIT_CONFLICT   # different hash on chain — our text is NOT what got committed
+            action key STAYS HELD
+            NO chat/ledger/suspicion/WS mutations
+        on other commit revert:
           commitStatus=COMMIT_FAILED
           action key STAYS HELD (do not retry doomed agent)
           no chat/ledger/suspicion/WS mutations
@@ -148,6 +181,8 @@ SomniaSol/contracts/facets/AgentRegistryFacet.sol  edit + commitAgentMessageV2 +
                                                         + LibStorage extension (Diamond storage-safe append)
 SomniaSol/scripts/upgrade-agent-registry-v4.ts     new  facet upgrade script (replace old facet via diamondCut)
 SomniaSol/test/AgentRegistryFacet.ts               edit + V2 message commit tests + dedup revert tests
+                                                        + ZeroMessageHash revert test (F-new-1)
+                                                        + getAgentMessageHash read tests
 ```
 
 ### Reuse from existing 4b/4f/4g
@@ -182,17 +217,23 @@ event AgentMessageCommittedV2(
 );
 
 error MessageAlreadyCommitted();
+error ZeroMessageHash();   // F-new-1: bytes32(0) is the "not committed" sentinel — reject it as input
 
 /// @notice Commit hash of an off-chain agent DAY-phase chat message.
 ///         Enforces dedup per (roomId, phaseId, agent) — replay-safe and
 ///         symmetric with commitAgentInference. Old commitAgentMessage retained
 ///         for backward compatibility but is no longer called by DAY handler.
+///
+///         **F-new-1:** rejects messageHash == bytes32(0). Otherwise a caller
+///         could write zero into storage and bypass the dedup check forever
+///         (zero is the "empty slot" sentinel).
 function commitAgentMessageV2(
     uint256 roomId,
     bytes32 phaseId,
     bytes32 messageHash
 ) external {
     LibGame.requireNotPaused();
+    if (messageHash == bytes32(0)) revert ZeroMessageHash();
     address agent = LibGame.resolvePlayer(roomId);
     if (!LibStorage.s().isAgent[roomId][agent]) revert NotAgent();
     if (LibStorage.s().agentMessageHash[roomId][phaseId][agent] != bytes32(0)) {
@@ -414,7 +455,8 @@ export type CommitStatus =
   | "PENDING_INFERENCE"   // inferChat dispatched, waiting for result
   | "PENDING_COMMIT"      // result received + scrubbed, about to send commit tx
   | "COMMITTED"           // commit tx mined successfully
-  | "COMMIT_FAILED"       // commit tx reverted; action key STAYS HELD
+  | "COMMIT_FAILED"       // commit tx reverted (non-dedup); action key STAYS HELD
+  | "COMMIT_CONFLICT"     // F-new-3: dedup revert + on-chain hash differs from our local hash
   | "INFER_TIMEOUT"       // no ChatResultReady within waitMs; action key STAYS HELD
   | "PHASE_ADVANCED"      // F3: room no longer in DAY at recheck before commit; no tx sent
   | "SPONSOR_LOW";        // sponsor below threshold; no inference, no commit
@@ -422,14 +464,23 @@ export type CommitStatus =
 export type MsgKind =
   | "MSG"                 // sanitized text published
   | "SKIP_SCRUBBED";      // scrubber blocked OR LLM returned empty → SKIP commit
+
+/** F-new-minor: explicit scrub outcome for cleaner code semantics; the boolean
+ *  scrubAllowed used in computeMessageHash is derived as (outcome === "ALLOWED"). */
+export type ScrubOutcome =
+  | "ALLOWED"             // sanitized text safe to publish
+  | "BLOCKED_ROLE_LEAK"   // regex matched role-revealing pattern; publish suppressed
+  | "EMPTY_RESPONSE";     // LLM returned empty/whitespace; treated as non-publishable
 ```
 
 **Reveal eligibility** (post-game audit endpoint, future): `commitStatus ==
 "COMMITTED"`. Both `msgKind == "MSG"` and `msgKind == "SKIP_SCRUBBED"` are
 revealable — the SKIP path is part of the audit trail. Other statuses
-(`COMMIT_FAILED`, `INFER_TIMEOUT`, `PHASE_ADVANCED`, `SPONSOR_LOW`) remain
-private since no on-chain commitment exists; revealing their prompt could leak
-strategy without a verifiable anchor.
+(`COMMIT_FAILED`, `COMMIT_CONFLICT`, `INFER_TIMEOUT`, `PHASE_ADVANCED`,
+`SPONSOR_LOW`) remain private since no on-chain commitment matching our local
+trace exists; revealing their prompt could leak strategy without a verifiable
+anchor (the `COMMIT_CONFLICT` case is especially sensitive — chain shows a
+*different* hash that we did not produce).
 
 ### Suspicion event idempotency — F6 v1 scope
 
@@ -454,9 +505,11 @@ async function applySuspicionEvent(state, event, redis, processedKey) {
 }
 ```
 
-Event ID sources:
-- VOTE chain events (PlayerVoted log): `${txHash}-${logIndex}`
-- KILL (NightEnded reveal log): `night-${roomId}-${dayCount}`
+Event ID sources (F-new-5 fix — use actual events from `LibGame.sol`):
+- VOTE chain events (PlayerVoted log): `vote-${txHash}-${logIndex}`
+- KILL via `NightResolvedByGM(roomId, killed, healed)` — emitted by `NightFacet.resolveNightAsGameMaster` (`NightFacet.sol:37`): `nightGM-${txHash}-${logIndex}`
+- KILL via `NightFinalized(roomId, killed, healed)` — emitted on peaceful timeout / no-action path (`LibGame.sol:389`): `nightFin-${txHash}-${logIndex}`
+- Both KILL events have shape `(roomId, killed, healed)`; treat `killed != address(0)` as the kill signal. `healed != address(0)` is informational only (used later in reveal phase).
 - (Deferred to Memory Engine) chat-derived events would use
   `chat-${commitTxHash}` once an extractor exists.
 
@@ -540,11 +593,12 @@ contradiction.
 | Sponsor balance check | `< SPONSOR_LOW_THRESHOLD_STT` | Skip; commitStatus=`SPONSOR_LOW`; persist `agentSkipReasonKey = "sponsor-low-no-inference"`. No inference, no commit. |
 | `inferChat` createRequest tx | reverts | Release action key (no LLM cost charged). Return `infer-failed`. |
 | `inferChat` timeout (>waitMs, no ChatResultReady) | LLM never responded | Action key **STAYS HELD**. commitStatus=`INFER_TIMEOUT`. Agent silent for this DAY. **Late ChatResultReady ignored** by checking elapsed time vs deadline. |
-| `inferChat` returns empty/whitespace | `result.response.trim() == ""` | Route as scrubbed-empty path: msgKind=`SKIP_SCRUBBED`, scrubAllowed=true (vacuous), commit goes through with empty `sanitizedTextHash`. |
-| Scrubber matched (role leak) | regex fired | msgKind=`SKIP_SCRUBBED`, scrubAllowed=false, commit goes through with empty `sanitizedTextHash`, no WS broadcast. |
+| `inferChat` returns empty/whitespace | `result.response.trim() == ""` | scrubOutcome=`EMPTY_RESPONSE`, msgKind=`SKIP_SCRUBBED`, scrubAllowed=false, commit goes through with empty `sanitizedTextHash`. |
+| Scrubber matched (role leak) | regex fired | scrubOutcome=`BLOCKED_ROLE_LEAK`, msgKind=`SKIP_SCRUBBED`, scrubAllowed=false, commit goes through with empty `sanitizedTextHash`, no WS broadcast. |
 | **F3 phase recheck before commit** | `chain.getRoom(roomId).phase != PHASE_DAY` | commitStatus=`PHASE_ADVANCED`. **No commit tx sent.** No WS. Action key released (LLM cost already incurred, but skipping commit is correct). |
-| `commitAgentMessageV2` tx reverts | `waitForReceiptOrRevert` throws | Trace already PENDING_COMMIT — update to COMMIT_FAILED. **Action key NOT released.** No Redis chat / ledger / suspicion mutations. No WS broadcast. |
-| `commitAgentMessageV2` reverts with `MessageAlreadyCommitted` | race between dedup pre-check and tx | Treat as success-equivalent (idempotent). Update commitStatus=`COMMITTED` (or `COMMIT_FAILED` + investigation log if unexpected). |
+| `commitAgentMessageV2` tx reverts (non-dedup) | `waitForReceiptOrRevert` throws on revert reason other than `MessageAlreadyCommitted` / `ZeroMessageHash` | Trace already PENDING_COMMIT — update to `COMMIT_FAILED`. **Action key NOT released.** No Redis chat / ledger / suspicion mutations. No WS broadcast. |
+| `commitAgentMessageV2` reverts with `ZeroMessageHash` | computeMessageHash produced bytes32(0) — should be impossible given non-empty TYPEHASH + non-zero salt | Programmer error. `commitStatus=COMMIT_FAILED`, loud structured log (`severity: assert`), action key STAYS HELD. Investigate. |
+| `commitAgentMessageV2` reverts with `MessageAlreadyCommitted` (F-new-3) | dedup hit — could be (a) our own retry post-restart or (b) racing different handler with different hash | Read `chain.getAgentMessageHash(roomId, phaseId, agent)`. **If stored == our messageHash** → treat as success-equivalent: `commitStatus=COMMITTED`, proceed with on-success side effects (chat/log/WS). **If stored != our messageHash** → `commitStatus=COMMIT_CONFLICT`, action key STAYS HELD, NO chat/ledger/suspicion/WS mutations — our local text is NOT what got committed on chain. |
 | Sponsor top-up tx fail (first attempt) | gas underpriced | 1 retry with 2x gasPrice (existing sponsor.ts pattern). If second fails → skip agent, commitStatus=`SPONSOR_LOW`. |
 | WS broadcast fail (after commit) | client disconnected | Commit is canonical. FE recovers via `AgentMessageCommittedV2` event subscription + Redis chat log pull. Log warn, no retry. |
 
@@ -553,22 +607,35 @@ contradiction.
 ```
 1. Persist trace { commitStatus: "PENDING_INFERENCE" }
 2. Send inferChat createRequest tx → wait ChatResultReady (or timeout)
-3. Scrub → decide msgKind (MSG | SKIP_SCRUBBED)
-4. F3: re-check chain.getRoom(roomId).phase == PHASE_DAY
-   if not → commitStatus="PHASE_ADVANCED", return; no tx, no broadcast
-5. Persist trace { commitStatus: "PENDING_COMMIT", msgKind, all F2 provenance fields }
-6. Send commitAgentMessageV2(roomId, phaseId, messageHash) tx
-7. waitForReceiptOrRevert
-8. If success:
-     a. Update trace { commitStatus: "COMMITTED", commitTxHash }   // msgKind preserved
+3. Scrub raw response → decide scrubOutcome (ALLOWED | BLOCKED_ROLE_LEAK | EMPTY_RESPONSE)
+   msgKind = (scrubOutcome === "ALLOWED") ? "MSG" : "SKIP_SCRUBBED"
+4. Compute hashes (independent of phase): salt, rawResponseHash, promptHash, sanitizedTextHash, messageHash
+5. F3 + F-new-4: re-check chain.getRoom(roomId).phase == PHASE_DAY
+   if not → persist trace { commitStatus="PHASE_ADVANCED", msgKind, hashes — for debug }; return; no tx, no broadcast
+6. Persist trace { commitStatus: "PENDING_COMMIT", msgKind, scrubOutcome, all F2 provenance fields }
+7. Send commitAgentMessageV2(roomId, phaseId, messageHash) tx
+8. waitForReceiptOrRevert
+9. If success:
+     a. Update trace { commitStatus: "COMMITTED", commitTxHash }   // msgKind / scrubOutcome preserved
      b. Set agentMessageCommittedKey Redis flag (cache for fast retries)
      c. If msgKind == "MSG":
         - rpush agentChatPromptKey + LTRIM 20
         - rpush agentChatLogKey
         - WS broadcast { type: "agent-chat", by, text, persona, day,
-                         messageHash, commitTxHash, somniaRequestId }
+                         messageHash, commitTxHash }
+          (F-new-2: somniaRequestId / promptHash / rawResponseHash STAY private in Redis
+           until GameEnded — they appear on chain as RequestCreated.payload and would
+           leak prompt/role mid-game per [[agent-role-secrecy]])
      d. (F6 v1: NO chat-event extraction into ledger / suspicion)
-   If revert:
+   If revert with `MessageAlreadyCommitted` (F-new-3):
+     a. stored := chain.getAgentMessageHash(roomId, phaseId, agent)
+     b. If stored == messageHash → go to step 9 success path (idempotent self-retry)
+     c. Else → Update trace { commitStatus: "COMMIT_CONFLICT" }; no Redis mutation; no WS; action key STAYS HELD
+   If revert with `ZeroMessageHash`:
+     a. Update trace { commitStatus: "COMMIT_FAILED", err: "ZeroMessageHash" }
+     b. Loud structured log (severity: assert — should be impossible)
+     c. action key STAYS HELD
+   If revert (other reason):
      a. Update trace { commitStatus: "COMMIT_FAILED" }   // msgKind preserved
      b. NO state mutations (chat, ledger, suspicion, WS untouched)
      c. action key STAYS HELD
@@ -593,13 +660,13 @@ listener instances claiming same key → only one wins.
 
 | File | Coverage |
 |---|---|
-| `scrubber.test.ts` | Blocklist hits: "I am the detective", "as the mafia...", "my role is doctor". False positives: "doctor of math", "the detective story", "mafia movies are fun". Returns `{allowed, reason:"ROLE_LEAK", matches, sanitized, scrubVersion}`. Verify `scrubVersion` constant exported and present in result. |
+| `scrubber.test.ts` | Blocklist hits → `outcome:"BLOCKED_ROLE_LEAK"`: "I am the detective", "as the mafia...", "my role is doctor". False positives → `outcome:"ALLOWED"`: "doctor of math", "the detective story", "mafia movies are fun". Empty/whitespace input → `outcome:"EMPTY_RESPONSE"`. Returns `{outcome, matches, sanitized, scrubVersion}`. Derived `scrubAllowed = outcome === "ALLOWED"` matches what `computeMessageHash` binds. Verify `SCRUB_VERSION` constant exported and present in result. |
 | `personas.test.ts` | Deterministic snapshot on fixed EOAs. All 10 personas reachable in 1000-EOA sample. Distribution sanity check **50–150 per persona** (loose to avoid flake). |
 | `suspicion.test.ts` | Each v1 chain-only rule applied → expected delta. Cap `[0,1]`. Notes appended. **eventId idempotency**: replay same event → no double-count. Different eventIds → both apply. Explicitly test that `KILL` does NOT mutate suspicion vector (v1 rule). |
 | `ledger.test.ts` | Append vote / kill / death events from chain sources. Read back consistent. Verify reserved fields (accusations / claims / defenses) remain empty in v1. Document v1 sequential-only constraint. |
-| `day.test.ts` | DI all deps with fakes. Cases: happy path (all 4 commit, ledger/chat/WS updated 4×); **F4**: scrubber blocks 1 → 3 normal commits + 1 commit with `commitStatus=COMMITTED, msgKind=SKIP_SCRUBBED`, only 3 WS broadcasts; inferChat throws on 1 → `commitStatus=INFER_TIMEOUT`, action key held, others unaffected; **F3 phase-advanced-during-infer**: pre-check passes, inferChat returns after delay, recheck shows phase advanced → `commitStatus=PHASE_ADVANCED`, no commit tx, no WS, action key released; **commit revert → `commitStatus=COMMIT_FAILED`, msgKind preserved, no Redis chat/ledger/suspicion mutation, no WS**; **F1 on-chain dedup hit**: `getAgentMessageHash` returns non-zero pre-check → `skipped-already-committed`, action key released; **F1 mid-tx revert with `MessageAlreadyCommitted`** → treated as success-equivalent; role miss → generic prompt, agent still commits; sponsor low → `commitStatus=SPONSOR_LOW`, structured reason persisted; phase advanced mid-round (pre-check) → remaining agents skip; replay DAY_STARTED → all `skipped-action-idempotent`; rotation: dayCount=0 vs 1 produces different speaker order. |
+| `day.test.ts` | DI all deps with fakes. Cases: happy path (all 4 commit, ledger/chat/WS updated 4×); **F4**: scrubber blocks 1 → 3 normal commits + 1 commit with `commitStatus=COMMITTED, msgKind=SKIP_SCRUBBED`, only 3 WS broadcasts; inferChat throws on 1 → `commitStatus=INFER_TIMEOUT`, action key held, others unaffected; **F3 phase-advanced-during-infer**: pre-check passes, inferChat returns after delay, recheck shows phase advanced → `commitStatus=PHASE_ADVANCED`, no commit tx, no WS, action key released; **commit revert → `commitStatus=COMMIT_FAILED`, msgKind preserved, no Redis chat/ledger/suspicion mutation, no WS**; **F1 on-chain dedup hit**: `getAgentMessageHash` returns non-zero pre-check → `skipped-already-committed`, action key released; **F-new-3 self-retry MessageAlreadyCommitted**: stored hash == our hash → success path proceeds; **F-new-3 conflict MessageAlreadyCommitted**: stored hash != our hash → `commitStatus=COMMIT_CONFLICT`, no WS, no chat mutation, action key held; role miss → generic prompt, agent still commits; sponsor low → `commitStatus=SPONSOR_LOW`, structured reason persisted; phase advanced mid-round (pre-check) → remaining agents skip; replay DAY_STARTED → all `skipped-action-idempotent`; rotation: dayCount=0 vs 1 produces different speaker order; **F-new-2 WS payload contains only {by, text, persona, day, messageHash, commitTxHash} — never somniaRequestId / promptHash / rawResponseHash.** |
 | `llm-chat-call.test.ts` | createRequest payload encoding correct; ChatResultReady subscription; getResult decoded as single string; **timeout → INFER_TIMEOUT**; **late ChatResultReady after timeout ignored** (state machine refuses transition out of terminal state). |
-| `messageHash.test.ts` | **F2 provenance fields:** same inputs → same hash; changing any of `somniaRequestId / promptHash / rawResponseHash / sanitizedTextHash / scrubVersion / scrubAllowed` → different hash. **F1 phase binding:** different `phaseId` → different hash. Different `roomId / chainId / agent / msgKind` → different hash. Cross-check vs reference eth-abi implementation (snapshot a known hash). |
+| `messageHash.test.ts` | **F2 provenance fields:** same inputs → same hash; changing any of `somniaRequestId / promptHash / rawResponseHash / sanitizedTextHash / scrubVersion / scrubAllowed` → different hash. **F1 phase binding:** different `phaseId` → different hash. Different `roomId / chainId / agent / msgKind` → different hash. Cross-check vs reference eth-abi implementation (snapshot a known hash). **F-new-1:** `computeMessageHash` over any non-empty material MUST NOT return `bytes32(0)` — assert against zero on every test case. |
 
 Target: ~28 new tests. Full suite target 235+/235+ green (current 208).
 
@@ -618,6 +685,7 @@ Target: ~28 new tests. Full suite target 235+/235+ green (current 208).
 3. Probe `getAgentMessageHash` for a known committed phase on an existing test agent → expect `0x000...` (storage is fresh — no prior writes).
 4. Manually call `commitAgentMessageV2(roomId, phaseId, fakeMessageHash)` from a registered agent via test wallet. Verify event emitted with all three indexed fields and storage updated.
 5. Second call with same `(roomId, phaseId)` → expect revert `MessageAlreadyCommitted`.
+6. **F-new-1:** call `commitAgentMessageV2(roomId, phaseId, bytes32(0))` → expect revert `ZeroMessageHash`. Verify storage stays unset and dedup still rejects subsequent non-zero commits.
 
 **`smoke-day-chat.ts`** (full handler smoke):
 1. Use existing room 8 with ≥1 active agent.
