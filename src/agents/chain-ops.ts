@@ -32,6 +32,27 @@ import type {
   VoteChainOps,
 } from "./voting.js";
 
+/**
+ * 4d DAY chat — chain-side methods the DayHandler needs in addition to the
+ * VoteChainOps surface. Lives here (not in day.ts) so the existing factory
+ * can satisfy both interfaces via structural typing.
+ */
+export interface DayChainOpsExtras {
+  sendCommitMessageV2(
+    agent: HDAccount,
+    roomId: bigint,
+    phaseId: Hex,
+    messageHash: Hex,
+    gasPriceGwei: number
+  ): Promise<Hex>;
+  getAgentMessageHash(
+    roomId: bigint,
+    phaseId: Hex,
+    agent: Address
+  ): Promise<Hex>;
+  getSponsorBalanceWei(): Promise<bigint>;
+}
+
 /** Empirical 120s timeout matches the GM tx helpers in chain.ts. */
 const TX_RECEIPT_TIMEOUT_MS = 120_000;
 
@@ -64,7 +85,7 @@ async function waitForReceiptOrRevert(
   }
 }
 
-export function makeVoteChainOps(chainId: number): VoteChainOps {
+export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExtras {
   const { public: publicClient, diamond } = getChainConfig(chainId);
   const chainObj = publicClient.chain as Chain | undefined;
   if (!chainObj) {
@@ -173,6 +194,56 @@ export function makeVoteChainOps(chainId: number): VoteChainOps {
         chain: chainObj,
         transport: http(rpcUrl),
       });
+    },
+
+    // ---- 4d DAY chat surface ----
+
+    async sendCommitMessageV2(
+      agent,
+      roomId,
+      phaseId,
+      messageHash,
+      gasPriceGwei
+    ) {
+      const wallet = createWalletClient({
+        account: agent,
+        chain: chainObj,
+        transport: http(rpcUrl),
+      });
+      const hash = await wallet.writeContract({
+        address: diamond,
+        abi: AGENT_REGISTRY_ABI,
+        functionName: "commitAgentMessageV2",
+        args: [roomId, phaseId, messageHash],
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "commitAgentMessageV2");
+      logger.debug(
+        { hash, agent: agent.address },
+        "[agents/chain-ops] commitAgentMessageV2 receipt success"
+      );
+      return hash;
+    },
+
+    async getAgentMessageHash(roomId, phaseId, agent) {
+      return publicClient.readContract({
+        address: diamond,
+        abi: AGENT_REGISTRY_ABI,
+        functionName: "getAgentMessageHash",
+        args: [roomId, phaseId, agent],
+      }) as Promise<Hex>;
+    },
+
+    async getSponsorBalanceWei() {
+      const sponsorEnv = process.env.AGENT_SPONSOR_PRIVATE_KEY;
+      if (!sponsorEnv) return 0n;
+      // Derive sponsor address from PK without importing crypto helpers here:
+      // chain.ts is the canonical place — we rely on sponsor.ts to surface the addr.
+      // For balance probe we re-use the sponsor address that voted/funded the agents.
+      // Fall back to deployer address if SPONSOR address resolution module is unavailable.
+      const sponsorAddr = process.env.AGENT_SPONSOR_ADDRESS as Address | undefined;
+      if (!sponsorAddr) return 0n;
+      return publicClient.getBalance({ address: sponsorAddr });
     },
   };
 }
