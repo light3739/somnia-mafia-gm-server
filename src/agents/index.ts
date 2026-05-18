@@ -16,6 +16,7 @@ import { logger } from "../utils/logger.js";
 import { AgentDispatcher } from "./dispatcher.js";
 import { AgentEventListener } from "./listener.js";
 import { VotingHandler } from "./voting.js";
+import { NightHandler } from "./night.js";
 import { makeVoteChainOps } from "./chain-ops.js";
 import { loadOrGenerateMnemonic } from "./wallets.js";
 
@@ -78,21 +79,32 @@ export async function startAgentSubsystem(): Promise<void> {
   }
 
   const mnemonic = loadOrGenerateMnemonic();
+  const language = process.env.AGENTS_LANGUAGE ?? "English";
+  const chainOpsFor = (chainId: number) => {
+    const ops = chainOpsCache.get(chainId);
+    if (!ops) throw new Error(`[agents] no chainOps for chainId ${chainId}`);
+    return ops;
+  };
+
   const votingHandler = new VotingHandler({
     redis,
-    chainOpsFor: (chainId) => {
-      const ops = chainOpsCache.get(chainId);
-      if (!ops) throw new Error(`[agents] no chainOps for chainId ${chainId}`);
-      return ops;
-    },
+    chainOpsFor,
     mnemonic,
-    language: process.env.AGENTS_LANGUAGE ?? "English",
+    language,
+  });
+
+  const nightHandler = new NightHandler({
+    redis,
+    chainOpsFor,
+    mnemonic,
+    language,
   });
 
   const dispatcher = new AgentDispatcher({
     redis,
     diamondByChain,
     votingHandler,
+    nightHandler,
   });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);
@@ -102,7 +114,7 @@ export async function startAgentSubsystem(): Promise<void> {
     {
       chainIds: [...diamondByChain.keys()],
       diamonds: [...diamondByChain.entries()].map(([cid, d]) => `${cid}=${d}`),
-      handlersWired: ["VOTING_STARTED"],
+      handlersWired: ["VOTING_STARTED", "NIGHT_STARTED"],
     },
     "[agents] subsystem started"
   );

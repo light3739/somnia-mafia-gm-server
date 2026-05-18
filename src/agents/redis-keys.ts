@@ -60,6 +60,22 @@ export function agentTraceKey(
   return `${NS}:trace:${chainId}:${roomId}:${phaseId}:${agent.toLowerCase()}`;
 }
 
+/**
+ * Per-agent role assignment for a single room. Stored by the GM when it
+ * assigns roles for the game; consumed by 4f NIGHT (role-gated tools list)
+ * and later by 4d DAY chat (role-aware persona).
+ *
+ * Value is the MafiaTypes.Role enum int as a string: "1"=MAFIA, "2"=DOCTOR,
+ * "3"=DETECTIVE, "4"=CITIZEN. Stored as string for ergonomic atomic SET.
+ */
+export function agentRoleKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:role:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
 /** TTL for idempotency markers — long enough to outlive any reasonable game
  * but short enough that Redis doesn't accumulate forever. 7 days. */
 export const IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 60 * 60;

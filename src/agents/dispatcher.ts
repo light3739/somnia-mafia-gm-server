@@ -17,6 +17,7 @@ import type { Hex } from "viem";
 import { logger } from "../utils/logger.js";
 import type { AgentEvent } from "./events.js";
 import type { VotingHandler, VotingStartedEvent } from "./voting.js";
+import type { NightHandler, NightStartedEvent } from "./night.js";
 import {
   eventProcessedKey,
   lastBlockKey,
@@ -28,6 +29,8 @@ export type DispatcherDeps = {
   diamondByChain: Map<number, Hex>;
   /** Optional: when wired, VOTING_STARTED is routed here. Skipped otherwise. */
   votingHandler?: VotingHandler;
+  /** Optional: when wired, NIGHT_STARTED is routed here. Skipped otherwise. */
+  nightHandler?: NightHandler;
 };
 
 export type DispatchOutcome =
@@ -113,7 +116,16 @@ export class AgentDispatcher {
         }
         break;
       case "NIGHT_STARTED":
-        // TODO 4f: dispatch NIGHT per active-role agent
+        if (this.deps.nightHandler) {
+          await this.deps.nightHandler
+            .handle(event as NightStartedEvent)
+            .catch((err) =>
+              logger.error(
+                { err, event: event.type, roomId: event.roomId },
+                "[agents] nightHandler.handle threw"
+              )
+            );
+        }
         break;
       case "GAME_ENDED":
         // TODO 4c: dispatch reveal-bundle for all agent traces in this room

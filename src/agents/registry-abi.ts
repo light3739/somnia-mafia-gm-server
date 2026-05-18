@@ -94,3 +94,35 @@ export function voteActionHash(target: Address): Hex {
     )
   );
 }
+
+/** Night action kinds. Mirrors MafiaTypes.NightActionType from on-chain. */
+export type NightActionKind = "KILL" | "HEAL" | "CHECK" | "SKIP";
+
+/**
+ * actionHash for a NIGHT phase commit. Layout matches voteActionHash:
+ *
+ *   keccak256(abi.encode("NIGHT_<kind>", target))
+ *
+ * SKIP uses address(0) as the target — citizens commit a deterministic SKIP
+ * so the on-chain footprint is identical-shape across all roles
+ * (role secrecy preserved mid-game via the salt-based traceCommitment).
+ */
+export function nightActionHash(
+  kind: NightActionKind,
+  target: Address
+): Hex {
+  const tag =
+    kind === "KILL"
+      ? "NIGHT_KILL"
+      : kind === "HEAL"
+      ? "NIGHT_HEAL"
+      : kind === "CHECK"
+      ? "NIGHT_CHECK"
+      : "NIGHT_SKIP";
+  return keccak256(
+    encodeAbiParameters(
+      [{ type: "string" }, { type: "address" }],
+      [tag, target]
+    )
+  );
+}
