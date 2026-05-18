@@ -79,3 +79,73 @@ export function agentRoleKey(
 /** TTL for idempotency markers — long enough to outlive any reasonable game
  * but short enough that Redis doesn't accumulate forever. 7 days. */
 export const IDEMPOTENCY_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/** 4d DAY chat — sliding window of last 20 sanitized chat msgs, fed into prompt. */
+export function agentChatPromptKey(chainId: number, roomId: string): string {
+  return `${NS}:chat:prompt:${chainId}:${roomId}`;
+}
+
+/** 4d DAY chat — append-only full chat log for audit / replay UI. */
+export function agentChatLogKey(chainId: number, roomId: string): string {
+  return `${NS}:chat:log:${chainId}:${roomId}`;
+}
+
+/** 4d DAY chat — JSON-encoded ledger {votes, kills, deaths, accusations, claims, defenses}.
+ *  v1 only populates the chain-derived fields (votes, kills, deaths). */
+export function agentLedgerKey(chainId: number, roomId: string): string {
+  return `${NS}:ledger:${chainId}:${roomId}`;
+}
+
+/** 4d DAY chat — per-agent suspicion/trust vector + notes (JSON). */
+export function agentSuspicionKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:suspicion:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
+/** 4d DAY chat — SET of processed suspicion-event ids (idempotency). */
+export function agentSuspicionProcessedKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:suspicion:processed:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
+/** 4d DAY chat — persona string per agent, pinned at fill-room time (EX=7d). */
+export function agentPersonaKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:persona:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
+/** 4d DAY chat — observability: why was this agent skipped for this phase? */
+export function agentSkipReasonKey(
+  chainId: number,
+  roomId: string,
+  phaseId: string,
+  agent: Hex
+): string {
+  return `${NS}:skip:${chainId}:${roomId}:${phaseId}:${agent.toLowerCase()}`;
+}
+
+/** 4d DAY chat — local cache flag "we committed for this slot" — fast-path
+ *  retry guard. On-chain getAgentMessageHash is source of truth. */
+export function agentMessageCommittedKey(
+  chainId: number,
+  roomId: string,
+  phaseId: string,
+  agent: Hex
+): string {
+  return `${NS}:msg:committed:${chainId}:${roomId}:${phaseId}:${agent.toLowerCase()}`;
+}
+
+/** 4d DAY chat — TTL for chat prompt window / full log / ledger / suspicion / committed flag. */
+export const DAY_CHAT_TTL_SECONDS = 24 * 60 * 60;
+
+/** 4d DAY chat — TTL for persona pin (survives multi-day testing). */
+export const PERSONA_TTL_SECONDS = 7 * 24 * 60 * 60;
