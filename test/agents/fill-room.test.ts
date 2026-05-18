@@ -69,6 +69,9 @@ class FakeRedis {
     }
     return v.value;
   }
+  async del(key: string): Promise<number> {
+    return this.store.delete(key) ? 1 : 0;
+  }
 }
 
 // ── Chain state + mocks ────────────────────────────────────────────────────
@@ -80,6 +83,12 @@ interface ChainState {
   joinFailures?: Map<string, string>;
   /** keyed by lowercase agent addr; throws given error from registerAgent */
   registerFailures?: Map<string, string>;
+  /**
+   * Override receipt.status for a specific tx hash returned by mocked writes.
+   * Used to simulate a tx that was MINED but REVERTED — distinct from the
+   * tx-call throwing (network failure / nonce error). Default 'success'.
+   */
+  receiptStatusByHash?: Map<string, string>;
 }
 
 const DIAMOND: Address = "0xdddddddddddddddddddddddddddddddddddddddd";
@@ -106,7 +115,10 @@ function buildFakeChainAccess(state: ChainState): {
     }
   });
 
-  const waitForReceipt = vi.fn(async () => ({ status: "success" }));
+  const waitForReceipt = vi.fn(async ({ hash }: any) => {
+    const override = state.receiptStatusByHash?.get(String(hash).toLowerCase());
+    return { status: override ?? "success" };
+  });
 
   const gmWrite = vi.fn(async ({ functionName, args }: any) => {
     if (functionName !== "registerAgent") {
@@ -443,5 +455,159 @@ describe("fillRoomWithAgents", () => {
       expect(o0.err).toContain("NotGM");
     }
     expect(result.outcomes.some((o) => o.status === "filled")).toBe(true);
+  });
+
+  // ── Review-finding regression tests ───────────────────────────────────
+
+  it("joinRoom mined-but-reverted receipt → join-failed (not silently filled)", async () => {
+    defaultSponsor();
+    const w0 = deriveAgentWallet({ mnemonic: TEST_MNEMONIC, roomId: 1n, idx: 0 });
+    // The agent walletClient's writeContract resolves with this hash; the
+    // receipt mock then reports status=reverted. Pre-fix this passed silently.
+    const revertedHash = (`0xa11ce${w0.address.slice(2, 10).toLowerCase()}${"0".repeat(50)}`).toLowerCase();
+    const { access } = buildFakeChainAccess({
+      room: {
+        phase: 0,
+        playersCount: 0,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [],
+      receiptStatusByHash: new Map([[revertedHash, "reverted"]]),
+    });
+
+    const result = await fillRoomWithAgents(
+      { chainId: 50312, roomId: 1n, agentCount: 1 },
+      {
+        redis: redis as any,
+        loadMnemonic: () => TEST_MNEMONIC,
+        chainAccessOverride: access,
+      }
+    );
+
+    expect(result.outcomes[0].status).toBe("join-failed");
+    if (result.outcomes[0].status === "join-failed") {
+      expect(result.outcomes[0].err).toContain("reverted");
+    }
+  });
+
+  it("registerAgent mined-but-reverted receipt → register-failed", async () => {
+    defaultSponsor();
+    const w0 = deriveAgentWallet({ mnemonic: TEST_MNEMONIC, roomId: 1n, idx: 0 });
+    // The GM mock returns this register hash; receipt mock reports reverted.
+    const regRevertedHash = (`0xb0b${w0.address.slice(2, 12).toLowerCase()}${"0".repeat(48)}`).toLowerCase();
+    const { access } = buildFakeChainAccess({
+      room: {
+        phase: 0,
+        playersCount: 0,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [],
+      receiptStatusByHash: new Map([[regRevertedHash, "reverted"]]),
+    });
+
+    const result = await fillRoomWithAgents(
+      { chainId: 50312, roomId: 1n, agentCount: 1 },
+      {
+        redis: redis as any,
+        loadMnemonic: () => TEST_MNEMONIC,
+        chainAccessOverride: access,
+      }
+    );
+
+    expect(result.outcomes[0].status).toBe("register-failed");
+  });
+
+  it("join failure releases action key — retry succeeds (no 7-day lockout)", async () => {
+    defaultSponsor();
+    const w0 = deriveAgentWallet({ mnemonic: TEST_MNEMONIC, roomId: 1n, idx: 0 });
+
+    // First run: joinRoom throws (e.g. transient network).
+    const failState: ChainState = {
+      room: {
+        phase: 0,
+        playersCount: 0,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [],
+      joinFailures: new Map([[w0.address.toLowerCase(), "ECONNRESET"]]),
+    };
+    const { access: failAccess } = buildFakeChainAccess(failState);
+    const firstResult = await fillRoomWithAgents(
+      { chainId: 50312, roomId: 1n, agentCount: 1 },
+      {
+        redis: redis as any,
+        loadMnemonic: () => TEST_MNEMONIC,
+        chainAccessOverride: failAccess,
+      }
+    );
+    expect(firstResult.outcomes[0].status).toBe("join-failed");
+
+    // Second run with a fresh access (no joinFailures). Pre-fix the action
+    // key stayed claimed → retry would mark "join-failed: action key already
+    // held" and never re-attempt. Post-fix the key was released so this
+    // retry must reach "filled".
+    const { access: successAccess } = buildFakeChainAccess({
+      room: {
+        phase: 0,
+        playersCount: 0,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [],
+    });
+    const retryResult = await fillRoomWithAgents(
+      { chainId: 50312, roomId: 1n, agentCount: 1 },
+      {
+        redis: redis as any,
+        loadMnemonic: () => TEST_MNEMONIC,
+        chainAccessOverride: successAccess,
+      }
+    );
+    expect(retryResult.outcomes[0].status).toBe("filled");
+  });
+
+  it("PRE_FUNDED agent: topUpTxHash = null (not a phantom zero hash)", async () => {
+    defaultSponsor();
+    const w0 = deriveAgentWallet({ mnemonic: TEST_MNEMONIC, roomId: 1n, idx: 0 });
+    const { access } = buildFakeChainAccess({
+      room: {
+        phase: 0,
+        playersCount: 0,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [],
+    });
+    // Mark this agent as already funded — fill-room should skip top-up entirely.
+    (access.publicClient as any).getBalance = vi.fn(async ({ address }: any) => {
+      if (String(address).toLowerCase() === w0.address.toLowerCase()) {
+        return parseEther("100");
+      }
+      return 0n;
+    });
+
+    const result = await fillRoomWithAgents(
+      { chainId: 50312, roomId: 1n, agentCount: 1 },
+      {
+        redis: redis as any,
+        loadMnemonic: () => TEST_MNEMONIC,
+        chainAccessOverride: access,
+      }
+    );
+
+    expect(result.outcomes[0].status).toBe("filled");
+    if (result.outcomes[0].status === "filled") {
+      expect(result.outcomes[0].topUpTxHash).toBeNull();
+    }
+    // sponsor.topUp was never called for the pre-funded agent
+    expect(vi.mocked(sponsorMod.topUp)).not.toHaveBeenCalled();
   });
 });

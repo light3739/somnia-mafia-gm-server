@@ -35,19 +35,33 @@ import type {
 /** Empirical 120s timeout matches the GM tx helpers in chain.ts. */
 const TX_RECEIPT_TIMEOUT_MS = 120_000;
 
-async function waitForReceipt(
+/**
+ * Wait for the receipt AND assert it succeeded. A reverted tx returns a
+ * receipt with status='reverted' — the old code merely awaited and swallowed,
+ * which let callers record a "successful" tx hash for a tx that never
+ * actually landed. Now we throw so caller surfaces vote-failed / commit-failed
+ * instead of silently lying in the trace audit.
+ */
+async function waitForReceiptOrRevert(
   publicClient: PublicClient,
-  hash: Hex
+  hash: Hex,
+  label: string
 ): Promise<void> {
-  await Promise.race([
+  const receipt = await Promise.race([
     publicClient.waitForTransactionReceipt({ hash }),
     new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`receipt timeout after ${TX_RECEIPT_TIMEOUT_MS}ms (${hash})`)),
+        () =>
+          reject(
+            new Error(`receipt timeout after ${TX_RECEIPT_TIMEOUT_MS}ms (${label} ${hash})`)
+          ),
         TX_RECEIPT_TIMEOUT_MS
       )
     ),
   ]);
+  if ((receipt as any).status !== "success") {
+    throw new Error(`${label} reverted on chain (tx ${hash})`);
+  }
 }
 
 export function makeVoteChainOps(chainId: number): VoteChainOps {
@@ -121,9 +135,10 @@ export function makeVoteChainOps(chainId: number): VoteChainOps {
         args: [roomId, target],
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
-      await waitForReceipt(publicClient, hash).catch((err) =>
-        logger.warn({ err, hash }, "[agents/chain-ops] vote receipt wait failed")
-      );
+      // Throws on revert / timeout so caller's catch surfaces vote-failed
+      // instead of recording a phantom voteTxHash in the trace.
+      await waitForReceiptOrRevert(publicClient, hash, "vote");
+      logger.debug({ hash, agent: agent.address }, "[agents/chain-ops] vote receipt success");
       return hash;
     },
 
@@ -147,12 +162,8 @@ export function makeVoteChainOps(chainId: number): VoteChainOps {
         args: [roomId, phaseId, actionHash, traceCommitment],
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
-      await waitForReceipt(publicClient, hash).catch((err) =>
-        logger.warn(
-          { err, hash },
-          "[agents/chain-ops] commit receipt wait failed"
-        )
-      );
+      await waitForReceiptOrRevert(publicClient, hash, "commitAgentInference");
+      logger.debug({ hash, agent: agent.address }, "[agents/chain-ops] commit receipt success");
       return hash;
     },
 

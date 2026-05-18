@@ -90,6 +90,8 @@ export interface FillRoomRequest {
   nicknamePrefix?: string;
   /** Override per-agent funding amount (in wei). Defaults to entryFee + deposit + gasReserve. */
   perAgentFundingWei?: bigint;
+  /** Gas price (gwei) for joinRoom + registerAgent. Defaults to AGENT_FILL_GAS_PRICE_GWEI env or 10. */
+  gasPriceGwei?: number;
 }
 
 export type AgentFillOutcome =
@@ -97,7 +99,8 @@ export type AgentFillOutcome =
       status: "filled";
       idx: number;
       agent: Address;
-      topUpTxHash: Hex;
+      /** `null` if agent was already funded before this call (no top-up tx fired). */
+      topUpTxHash: Hex | null;
       joinTxHash: Hex;
       registerTxHash: Hex;
       eciesPubHex: string;
@@ -112,7 +115,7 @@ export type AgentFillOutcome =
       idx: number;
       agent: Address;
       err: string;
-      topUpTxHash?: Hex;
+      topUpTxHash?: Hex | null;
       joinTxHash?: Hex;
     };
 
@@ -286,11 +289,18 @@ export async function fillRoomWithAgents(
     return { roomId: roomId.toString(), chainId, sponsor: sponsorAddr, outcomes };
   }
 
+  const gasPriceGwei =
+    req.gasPriceGwei ??
+    (process.env.AGENT_FILL_GAS_PRICE_GWEI
+      ? Number(process.env.AGENT_FILL_GAS_PRICE_GWEI)
+      : 10);
+
   // ── Phase 1: sequential sponsor top-ups ─────────────────────────────
   // Skip top-up if the agent already holds at least `perAgentFunding` — handles
   // the partial-failure retry case (prior run topped up but never joined).
-  const topUpHashes = new Map<string, Hex>();
-  const PRE_FUNDED_MARK = "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex;
+  // Map values: Hex tx hash on success, `null` for "already funded, no tx
+  // fired" (using a Hex sentinel would conflict with the real zero-hash).
+  const topUpHashes = new Map<string, Hex | null>();
   for (const w of todo) {
     try {
       const existing = await publicClient.getBalance({ address: w.address });
@@ -299,7 +309,7 @@ export async function fillRoomWithAgents(
           { agent: w.address, existing: existing.toString() },
           "[agents/fill] agent already funded — skipping top-up"
         );
-        topUpHashes.set(w.address.toLowerCase(), PRE_FUNDED_MARK);
+        topUpHashes.set(w.address.toLowerCase(), null);
         continue;
       }
       const hash = await topUp(chainId, w.address, perAgentFunding - existing, {
@@ -330,14 +340,15 @@ export async function fillRoomWithAgents(
 
   await Promise.all(
     funded.map(async (w) => {
+      const actionKey = agentActionProcessedKey(
+        chainId,
+        roomId.toString(),
+        "LOBBY-JOIN",
+        w.address,
+        "join"
+      );
+      let claimedHere = false;
       try {
-        const actionKey = agentActionProcessedKey(
-          chainId,
-          roomId.toString(),
-          "LOBBY-JOIN",
-          w.address,
-          "join"
-        );
         const claimed = await deps.redis.set(
           actionKey,
           JSON.stringify({ startedAt: Date.now() }),
@@ -345,13 +356,19 @@ export async function fillRoomWithAgents(
           IDEMPOTENCY_TTL_SECONDS,
           "NX"
         );
-        // If not claimed AND no on-chain state, something is weird; if not
-        // claimed AND on-chain present, the pre-check above already filtered
-        // — so this is a safety net only.
+        // If not claimed: either a concurrent fill-room is in flight, or a
+        // previous run failed and left the key. The on-chain inRoom pre-check
+        // above already filtered successfully-joined agents, so a held key
+        // here means stale — release and proceed so retries work. Concurrent
+        // duplicates are caught by the joinRoom tx reverting with AlreadyJoined.
         if (claimed !== "OK") {
-          joinErrors.set(w.address.toLowerCase(), "action key already held");
-          return;
+          log.warn(
+            { agent: w.address },
+            "[agents/fill] stale LOBBY-JOIN action key — releasing and retrying"
+          );
+          await deps.redis.del(actionKey);
         }
+        claimedHere = true;
 
         const kp = await ensureAgentEciesKeypair(
           deps.redis,
@@ -374,17 +391,16 @@ export async function fillRoomWithAgents(
           functionName: "joinRoom",
           args: [roomId, nickname, pubKeyBytes, ZERO_ADDR, gmSignature],
           value: valueForJoin,
-          gasPrice: parseGwei("10"),
+          gasPrice: parseGwei(String(gasPriceGwei)),
           chain: null,
         } as any);
-        await publicClient
-          .waitForTransactionReceipt({ hash })
-          .catch((err: any) =>
-            log.warn(
-              { err, hash, agent: w.address },
-              "[agents/fill] joinRoom receipt wait failed"
-            )
-          );
+        // Check receipt status — a reverted joinRoom (nickname too long, bad
+        // permit, race vs human player) would otherwise silently pass and
+        // make Phase 3 register against a non-player.
+        const receipt: any = await publicClient.waitForTransactionReceipt({ hash });
+        if (receipt.status !== "success") {
+          throw new Error(`joinRoom reverted (tx ${hash})`);
+        }
         joinHashes.set(w.address.toLowerCase(), hash);
         log.info({ agent: w.address, hash }, "[agents/fill] joinRoom ok");
       } catch (err: any) {
@@ -392,6 +408,16 @@ export async function fillRoomWithAgents(
           w.address.toLowerCase(),
           String(err?.message ?? err)
         );
+        // CRITICAL: release the action key so retries can re-claim. Otherwise
+        // the agent is locked out for IDEMPOTENCY_TTL_SECONDS (7 days).
+        if (claimedHere) {
+          await deps.redis.del(actionKey).catch((delErr: any) =>
+            log.warn(
+              { delErr, actionKey },
+              "[agents/fill] failed to release action key after join error"
+            )
+          );
+        }
         log.error(
           { agent: w.address, err: String(err?.message ?? err) },
           "[agents/fill] joinRoom failed"
@@ -437,17 +463,19 @@ export async function fillRoomWithAgents(
         abi: AGENT_REGISTRY_WRITE_ABI,
         functionName: "registerAgent",
         args: [roomId, w.address, POLICY_HASH, MODEL_HASH, META_HASH],
-        gasPrice: parseGwei("10"),
+        gasPrice: parseGwei(String(gasPriceGwei)),
         chain: null,
       } as any)) as Hex;
-      await publicClient
-        .waitForTransactionReceipt({ hash: registerTxHash })
-        .catch((err: any) =>
-          log.warn(
-            { err, registerTxHash },
-            "[agents/fill] registerAgent receipt wait failed"
-          )
-        );
+      // Receipt-status check is mandatory: registerAgent can revert if isAgent
+      // mapping was already set (race vs concurrent fill) or if gameMaster was
+      // rotated. Swallowing those used to mark the agent "filled" while chain
+      // state said otherwise.
+      const regReceipt: any = await publicClient.waitForTransactionReceipt({
+        hash: registerTxHash,
+      });
+      if (regReceipt.status !== "success") {
+        throw new Error(`registerAgent reverted (tx ${registerTxHash})`);
+      }
       log.info(
         { agent: w.address, registerTxHash },
         "[agents/fill] registerAgent ok"

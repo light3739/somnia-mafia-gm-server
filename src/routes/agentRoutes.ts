@@ -41,7 +41,8 @@ function isEnabled(): boolean {
 function authOk(req: any): boolean {
   const required = process.env.AGENTS_API_KEY;
   if (!required) return true; // open access — fine for testnet, NOT for mainnet
-  const provided = req.headers["x-agents-api-key"] ?? req.headers["X-Agents-Api-Key"];
+  // Express normalises headers to lowercase — the capital-case fallback was dead code.
+  const provided = req.headers["x-agents-api-key"];
   return typeof provided === "string" && provided === required;
 }
 

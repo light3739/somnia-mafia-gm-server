@@ -110,7 +110,7 @@ export async function topUp(
   })) as Hex;
 
   if (waitForReceipt) {
-    await Promise.race([
+    const receipt = await Promise.race([
       publicClient.waitForTransactionReceipt({ hash }),
       new Promise<never>((_, reject) =>
         setTimeout(
@@ -119,6 +119,11 @@ export async function topUp(
         )
       ),
     ]);
+    // A reverted top-up means the agent never received funds — caller must
+    // know so the join phase doesn't run with a still-empty wallet.
+    if ((receipt as any).status !== "success") {
+      throw new Error(`topUp reverted on chain (tx ${hash})`);
+    }
   }
   return hash;
 }

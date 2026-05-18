@@ -74,6 +74,10 @@ class FakeRedis {
     }
     return v.value;
   }
+
+  async del(key: string): Promise<number> {
+    return this.store.delete(key) ? 1 : 0;
+  }
 }
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -599,6 +603,97 @@ describe("VotingHandler", () => {
     );
     const promptArg = (inferFn as any).mock.calls[0][0].prompt as string;
     expect(promptArg).toContain("suspicious");
+  });
+
+  // ── Review-finding regression tests ───────────────────────────────────
+
+  it("only-self-alive → skipped-no-targets (no LLM call, no vote tx)", async () => {
+    const [agentAddr] = deriveAgentAddresses(1);
+    const chain = makeFakeChain({
+      room: { phase: PHASE_VOTING, dayCount: DAY_COUNT, aliveCount: 1 },
+      players: [activePlayer(agentAddr)], // only self
+      agentSet: new Set([agentAddr.toLowerCase()]),
+      existingCommitment: ZERO32,
+    });
+    const inferFn = vi.fn(async () => {
+      throw new Error("LLM must not be called");
+    });
+
+    const handler = buildHandler({ chain, inferFn });
+    const outcomes = await handler.handle(votingEvent());
+
+    expect(outcomes[0].status).toBe("skipped-no-targets");
+    expect(inferFn).not.toHaveBeenCalled();
+    expect(chain.sendVote).not.toHaveBeenCalled();
+  });
+
+  it("inferString throws → action key released → retry runs LLM again", async () => {
+    const [agentAddr, otherAddr] = deriveAgentAddresses(2);
+    const chain = makeFakeChain({
+      room: { phase: PHASE_VOTING, dayCount: DAY_COUNT, aliveCount: 2 },
+      players: [activePlayer(agentAddr), activePlayer(otherAddr)],
+      agentSet: new Set([agentAddr.toLowerCase()]),
+      existingCommitment: ZERO32,
+    });
+    let callCount = 0;
+    const inferFn = vi.fn(async () => {
+      callCount++;
+      if (callCount === 1) throw new Error("transient RPC error");
+      return {
+        text: otherAddr,
+        status: 2,
+        requestId: 9n,
+        txHash: LLM_TX_HASH,
+        latencySec: 1,
+      };
+    });
+
+    const handler = buildHandler({ chain, inferFn });
+    const first = await handler.handle(votingEvent());
+    expect(first[0].status).toBe("vote-failed");
+    expect(first[0].err).toContain("transient");
+
+    // Retry — pre-fix the action key stayed claimed and we'd hit
+    // skipped-action-idempotent. Post-fix the key was released since the
+    // failure happened BEFORE the vote tx.
+    const second = await handler.handle(votingEvent());
+    expect(second[0].status).toBe("voted");
+    expect(inferFn).toHaveBeenCalledTimes(2);
+  });
+
+  it("inferString fails AFTER vote tx → action key stays held (no double-vote)", async () => {
+    // Sanity-check: when failure happens after the on-chain vote, we keep the
+    // action key so a retry can't issue a SECOND vote tx.
+    const [agentAddr, otherAddr] = deriveAgentAddresses(2);
+    const sendCommit = vi.fn(async () => {
+      throw new Error("commit revert");
+    });
+    const chain = makeFakeChain(
+      {
+        room: { phase: PHASE_VOTING, dayCount: DAY_COUNT, aliveCount: 2 },
+        players: [activePlayer(agentAddr), activePlayer(otherAddr)],
+        agentSet: new Set([agentAddr.toLowerCase()]),
+        existingCommitment: ZERO32,
+      },
+      { sendCommit }
+    );
+    const inferFn = vi.fn(async () => ({
+      text: otherAddr,
+      status: 2,
+      requestId: 1n,
+      txHash: LLM_TX_HASH,
+      latencySec: 1,
+    }));
+
+    const handler = buildHandler({ chain, inferFn });
+    const first = await handler.handle(votingEvent());
+    expect(first[0].status).toBe("commit-failed");
+    expect(chain.sendVote).toHaveBeenCalledTimes(1);
+
+    // Retry must be short-circuited by the action key (vote tx already fired)
+    const second = await handler.handle(votingEvent());
+    expect(second[0].status).toBe("skipped-action-idempotent");
+    expect(chain.sendVote).toHaveBeenCalledTimes(1); // NOT incremented
   });
 });
 

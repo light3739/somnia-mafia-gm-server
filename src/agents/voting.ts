@@ -156,6 +156,7 @@ export interface AgentVoteOutcome {
     | "skipped-already-voted"
     | "skipped-action-idempotent"
     | "skipped-already-committed"
+    | "skipped-no-targets"
     | "vote-failed"
     | "commit-failed";
   voteTxHash?: Hex;
@@ -321,6 +322,18 @@ export class VotingHandler {
       log.info("[agents/voting] HAS_VOTED already set on chain — skipping");
       return { agent: wallet.address, status: "skipped-already-voted" };
     }
+    // No valid targets — only self is alive (game effectively over). Avoid
+    // spending the inferString deposit and bypass resolveDecision's throw path.
+    const validTargets = allAlive.filter(
+      (a) => a.toLowerCase() !== wallet.address.toLowerCase()
+    );
+    if (validTargets.length === 0) {
+      log.warn(
+        { allAlive },
+        "[agents/voting] only self is alive — no vote target available"
+      );
+      return { agent: wallet.address, status: "skipped-no-targets" };
+    }
 
     // 2. Action idempotency. If we've started/finished this slot before, skip.
     const actionKey = agentActionProcessedKey(
@@ -397,6 +410,15 @@ export class VotingHandler {
       );
     } catch (err: any) {
       log.error({ err: String(err?.message ?? err) }, "[agents/voting] inferString threw");
+      // Release action key — no on-chain action happened yet, so a future
+      // re-delivery (listener restart within the voting window) can retry.
+      // After the vote tx fires we deliberately keep the key.
+      await this.deps.redis.del(actionKey).catch((delErr: any) =>
+        log.warn(
+          { delErr, actionKey },
+          "[agents/voting] failed to release action key after infer fail"
+        )
+      );
       return {
         agent: wallet.address,
         status: "vote-failed",
