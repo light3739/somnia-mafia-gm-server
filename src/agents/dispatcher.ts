@@ -18,6 +18,7 @@ import { logger } from "../utils/logger.js";
 import type { AgentEvent } from "./events.js";
 import type { VotingHandler, VotingStartedEvent } from "./voting.js";
 import type { NightHandler, NightStartedEvent } from "./night.js";
+import type { DayHandler, DayStartedEvent } from "./day.js";
 import {
   eventProcessedKey,
   lastBlockKey,
@@ -31,6 +32,8 @@ export type DispatcherDeps = {
   votingHandler?: VotingHandler;
   /** Optional: when wired, NIGHT_STARTED is routed here. Skipped otherwise. */
   nightHandler?: NightHandler;
+  /** Optional: when wired, DAY_STARTED is routed here. Skipped otherwise. */
+  dayHandler?: DayHandler;
 };
 
 export type DispatchOutcome =
@@ -98,7 +101,16 @@ export class AgentDispatcher {
     // listener (which would stall the entire chain subscription).
     switch (event.type) {
       case "DAY_STARTED":
-        // TODO 4d: dispatch DAY chat for each agent in roomId
+        if (this.deps.dayHandler) {
+          await this.deps.dayHandler
+            .handle(event as DayStartedEvent)
+            .catch((err) =>
+              logger.error(
+                { err, event: event.type, roomId: event.roomId },
+                "[agents] dayHandler.handle threw"
+              )
+            );
+        }
         break;
       case "VOTING_STARTED":
         if (this.deps.votingHandler) {

@@ -17,8 +17,10 @@ import { AgentDispatcher } from "./dispatcher.js";
 import { AgentEventListener } from "./listener.js";
 import { VotingHandler } from "./voting.js";
 import { NightHandler } from "./night.js";
+import { DayHandler, type DayBroadcaster } from "./day.js";
 import { makeVoteChainOps } from "./chain-ops.js";
 import { loadOrGenerateMnemonic } from "./wallets.js";
+import { wsManager } from "../ws/wsManager.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -100,11 +102,37 @@ export async function startAgentSubsystem(): Promise<void> {
     language,
   });
 
+  // 4d DAY chat — opt-in via AGENTS_DAY_ENABLED. Skipped (no listener wire)
+  // when disabled so a misconfigured deployment cannot accidentally chat-spam.
+  const dayEnabled =
+    (process.env.AGENTS_DAY_ENABLED ?? "").toLowerCase() === "true";
+  let dayHandler: DayHandler | undefined;
+  if (dayEnabled) {
+    const broadcaster: DayBroadcaster = {
+      broadcastToRoom(roomId, chainId, ev) {
+        const { type, ...data } = ev;
+        wsManager.broadcastToRoom(roomId, chainId, { type, data });
+      },
+    };
+    dayHandler = new DayHandler({
+      redis,
+      chainOpsFor,
+      ws: broadcaster,
+      mnemonic,
+      language: process.env.AGENTS_DAY_LANGUAGE ?? language,
+      llmWaitMs: Number(process.env.LLM_CHAT_WAIT_MS ?? "25000"),
+      llmGasPriceGwei: Number(process.env.LLM_CHAT_GAS_PRICE_GWEI ?? "10"),
+      txGasPriceGwei: Number(process.env.TX_GAS_PRICE_GWEI ?? "10"),
+      sponsorLowThresholdStt: Number(process.env.SPONSOR_LOW_THRESHOLD_STT ?? "1.5"),
+    });
+  }
+
   const dispatcher = new AgentDispatcher({
     redis,
     diamondByChain,
     votingHandler,
     nightHandler,
+    dayHandler,
   });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);
@@ -114,7 +142,11 @@ export async function startAgentSubsystem(): Promise<void> {
     {
       chainIds: [...diamondByChain.keys()],
       diamonds: [...diamondByChain.entries()].map(([cid, d]) => `${cid}=${d}`),
-      handlersWired: ["VOTING_STARTED", "NIGHT_STARTED"],
+      handlersWired: [
+        "VOTING_STARTED",
+        "NIGHT_STARTED",
+        ...(dayEnabled ? ["DAY_STARTED"] : []),
+      ],
     },
     "[agents] subsystem started"
   );

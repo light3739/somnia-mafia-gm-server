@@ -41,6 +41,7 @@ export interface ServerEvent {
     | 'player-update'
     | 'roles-revealed'
     | 'mafia-chat'
+    | 'agent-chat'
     | 'game-signal'
     | 'rematch-invite'
     | 'prize-distributed'
