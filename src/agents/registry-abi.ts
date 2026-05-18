@@ -38,6 +38,12 @@ export const AGENT_REGISTRY_ABI = parseAbi([
   // Events
   "event AgentInferenceCommitted(uint256 indexed roomId, bytes32 indexed phaseId, address indexed agent, bytes32 actionHash, bytes32 traceCommitment)",
   "event AgentRegistered(uint256 indexed roomId, address indexed agent, bytes32 policyHash, bytes32 modelHash, bytes32 metadataHash)",
+  // V2 DAY chat
+  "function commitAgentMessageV2(uint256 roomId, bytes32 phaseId, bytes32 messageHash)",
+  "function getAgentMessageHash(uint256 roomId, bytes32 phaseId, address agent) view returns (bytes32)",
+  "event AgentMessageCommittedV2(uint256 indexed roomId, bytes32 indexed phaseId, address indexed agent, bytes32 messageHash)",
+  "error MessageAlreadyCommitted()",
+  "error ZeroMessageHash()",
 ]);
 
 /**
