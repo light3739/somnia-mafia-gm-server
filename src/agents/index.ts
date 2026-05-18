@@ -40,6 +40,29 @@ function resolveChainIds(): number[] {
   return [50312];
 }
 
+/**
+ * 4d DAY chat boot validation. Fails fast on misconfig so a deployment with
+ * AGENTS_DAY_ENABLED=true cannot silently skip every commit due to a missing
+ * store address.
+ */
+function assertDayConfig(chainIds: number[]): void {
+  const enabled = (process.env.AGENTS_DAY_ENABLED ?? "").toLowerCase() === "true";
+  if (!enabled) return;
+  for (const cid of chainIds) {
+    if (!process.env[`LLM_CHAT_STORE_${cid}`]) {
+      throw new Error(
+        `[agents] AGENTS_DAY_ENABLED=true but LLM_CHAT_STORE_${cid} is unset`
+      );
+    }
+  }
+  const scrubber = (process.env.SCRUBBER_MODE ?? "strict").toLowerCase();
+  if (scrubber === "disabled" && process.env.NODE_ENV !== "local") {
+    throw new Error(
+      `[agents] SCRUBBER_MODE=disabled is only allowed when NODE_ENV=local (got NODE_ENV=${process.env.NODE_ENV})`
+    );
+  }
+}
+
 export async function startAgentSubsystem(): Promise<void> {
   if (!isEnabled()) {
     logger.info(
@@ -72,6 +95,9 @@ export async function startAgentSubsystem(): Promise<void> {
     logger.warn("[agents] no chains configured, subsystem inactive");
     return;
   }
+
+  // 4d boot validation — fail fast on misconfig.
+  assertDayConfig([...diamondByChain.keys()]);
 
   // Build per-chain VoteChainOps once (closures inside cache the viem clients).
   // VotingHandler is stateless across chains — chainOpsFor dispatches.
