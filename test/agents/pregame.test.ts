@@ -35,6 +35,17 @@ import { deriveAgentWallets } from "../../src/agents/wallets.js";
 import { agentSraKey, agentRoleSaltKey } from "../../src/agents/redis-keys.js";
 import { getAgentRole } from "../../src/agents/roles.js";
 import { Role, GamePhase, FLAGS } from "../../src/types/contract.js";
+import { GMStore } from "../../src/stores/index.js";
+import {
+  submitSraKey,
+  registerOnResolved,
+  _resetOnResolvedForTests,
+} from "../../src/services/roleResolution.js";
+import {
+  generateDistributedDeck,
+  generateVerifiedSraKeys,
+  encryptDeck,
+} from "../../src/crypto/sra.js";
 
 // ─── In-memory Redis fake (mirrors voting.test.ts) ─────────────────────────
 class FakeRedis {
@@ -456,5 +467,81 @@ describe("PreGameHandler.handleReveal", () => {
         call.recipients.some((r) => r.toLowerCase() === call.agent.toLowerCase())
       ).toBe(false);
     }
+  });
+});
+
+// ─── MIXED (human present) REVEAL ──────────────────────────────────────────
+describe("PreGameHandler.handleReveal — mixed (human present)", () => {
+  let redis: FakeRedis;
+  beforeEach(() => {
+    redis = new FakeRedis();
+    _resetOnResolvedForTests();
+  });
+
+  it("injects agent keys, then confirms via onResolved when the human's key lands", async () => {
+    const agents = agentAddrs(3);
+    const human = "0x9999999999999999999999999999999999999999" as Address;
+    const players = [...agents, human];
+
+    const deck = generateDistributedDeck(players.map(() => ({ isAlive: true })), ROOM_ID.toString());
+    const unique = [...new Set(deck)];
+    const keys = players.map(() => generateVerifiedSraKeys(unique));
+    let enc = deck;
+    for (const k of keys) enc = encryptDeck(enc, k.e);
+
+    agents.forEach((a, i) => {
+      redis.store.set(
+        agentSraKey(CHAIN_ID, ROOM_ID.toString(), a),
+        { value: JSON.stringify({ e: keys[i].e.toString(), d: keys[i].d.toString() }), expiresAt: null }
+      );
+    });
+    const humanD = keys[3].d.toString();
+
+    const chain = new FakeChain(players, {
+      phase: GamePhase.REVEAL,
+      agentSet: new Set(agents.map((a) => a.toLowerCase())),
+    });
+    chain.revealedDeck = enc;
+
+    const store = new GMStore();
+    const handler = buildHandler(redis, chain, { store });
+    registerOnResolved((cid, rid) => {
+      void handler.confirmResolvedRoles(cid, rid);
+    });
+
+    await handler.handleReveal(evt);
+    const roomKey = store.getRoomKey(CHAIN_ID, ROOM_ID.toString());
+    expect(store.getRoomMap(store.sraSKeys, roomKey).size).toBe(3);
+    expect(chain.confirmRoleCalls).toHaveLength(0);
+
+    await submitSraKey(
+      {
+        store,
+        redis: redis as any,
+        chainId: CHAIN_ID,
+        roomId: ROOM_ID.toString(),
+        fetchPlayers: async () => players.map((wallet) => ({ wallet })),
+        fetchDeck: async () => enc,
+      },
+      human,
+      humanD
+    );
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(chain.confirmRoleCalls).toHaveLength(3);
+    expect(chain.phase).toBe(GamePhase.REVEAL);
+  });
+
+  it("returns resolve-failed when no store is configured (degraded)", async () => {
+    const agents = agentAddrs(3);
+    const human = "0x9999999999999999999999999999999999999999" as Address;
+    const chain = new FakeChain([...agents, human], {
+      phase: GamePhase.REVEAL,
+      agentSet: new Set(agents.map((a) => a.toLowerCase())),
+    });
+    chain.revealedDeck = ["x", "x", "x", "x"];
+    const handler = buildHandler(redis, chain);
+    const out = await handler.handleReveal(evt);
+    expect(out.every((o) => o.status === "resolve-failed")).toBe(true);
   });
 });

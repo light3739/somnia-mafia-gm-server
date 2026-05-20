@@ -61,6 +61,8 @@ import {
   PREGAME_TTL_SECONDS,
 } from "./redis-keys.js";
 import { eciesEncrypt } from "../ecies.js";
+import type { GMStore } from "../stores/index.js";
+import { submitSraKey } from "../services/roleResolution.js";
 
 // ─── Chain surface ───────────────────────────────────────────────────────────
 
@@ -141,6 +143,9 @@ export interface PreGameHandlerDeps {
    * directly, so it's pure gas. Enable for mixed games / on-chain completeness.
    */
   shareKeysOnChain?: boolean;
+  /** GM in-memory store. Required for mixed (human+agent) role resolution; without
+   *  it the mixed REVEAL branch degrades to resolve-failed. */
+  store?: GMStore;
 }
 
 export type ShuffleStatus =
@@ -159,6 +164,7 @@ export interface ShuffleOutcome {
 
 export type RevealStatus =
   | "confirmed"
+  | "key-injected"
   | "skipped-already-confirmed"
   | "resolve-failed"
   | "failed";
@@ -347,11 +353,42 @@ export class PreGameHandler {
       else missing.push(p.wallet);
     }
     if (missing.length > 0) {
-      log.error(
-        { missing },
-        "[pregame] missing SRA keys for some players — cannot resolve roles server-direct (mixed game?)"
-      );
-      return myAgents.map((w) => ({ agent: w.address, status: "resolve-failed" as const }));
+      // MIXED game (humans present): we don't hold every key. Inject our agents'
+      // keys into the shared GM resolution; the human submits theirs via HTTP.
+      // When all are present, roleResolution fires onResolved -> confirmResolvedRoles.
+      if (!this.deps.store) {
+        log.error({ missing }, "[pregame] mixed game but no GMStore configured — cannot resolve");
+        return myAgents.map((w) => ({ agent: w.address, status: "resolve-failed" as const }));
+      }
+      const store = this.deps.store;
+      const outcomes: RevealOutcome[] = [];
+      for (const w of myAgents) {
+        const k = await this.loadSraKeys(chain.chainId, roomIdStr, w.address);
+        if (!k) {
+          outcomes.push({ agent: w.address, status: "resolve-failed" });
+          continue;
+        }
+        try {
+          await submitSraKey(
+            {
+              store,
+              redis: this.deps.redis as any,
+              chainId: chain.chainId,
+              roomId: roomIdStr,
+              fetchPlayers: async () => (await chain.getPlayers(roomId)).map((p) => ({ wallet: p.wallet })),
+              fetchDeck: async () => chain.getDeck(roomId),
+            },
+            w.address,
+            k.d.toString()
+          );
+          outcomes.push({ agent: w.address, status: "key-injected" });
+        } catch (err: any) {
+          log.error({ err: String(err?.message ?? err), agent: w.address }, "[pregame] submitSraKey failed");
+          outcomes.push({ agent: w.address, status: "failed", err: String(err?.message ?? err) });
+        }
+      }
+      log.info({ outcomes: outcomes.map((o) => o.status) }, "[pregame] mixed: agent keys injected; confirm via onResolved");
+      return outcomes;
     }
 
     const deck = await chain.getDeck(roomId);
@@ -417,6 +454,48 @@ export class PreGameHandler {
       )
     );
     return outcomes;
+  }
+
+  /**
+   * Confirm role for each of our agents whose role is resolved in the GM store
+   * and not yet confirmed on chain. Invoked by the roleResolution onResolved hook
+   * (mixed games). Fire-and-forget; idempotent via FLAG_CONFIRMED_ROLE + revert.
+   */
+  async confirmResolvedRoles(chainId: number, roomId: string): Promise<RevealOutcome[]> {
+    if (!this.deps.store) return [];
+    const chain = this.deps.chainOpsFor(chainId);
+    const roomIdBig = BigInt(roomId);
+    const log = logger.child({ mod: "agents/pregame", chainId, roomId, phase: "REVEAL-confirm" });
+
+    const room = await chain.getRoom(roomIdBig).catch(() => null);
+    if (!room || room.phase !== GamePhase.REVEAL) return [];
+
+    const players = await chain.getPlayers(roomIdBig);
+    const myByAddr = await this.resolveMyAgents(chain, roomIdBig, players);
+    if (myByAddr.size === 0) return [];
+
+    const roomKey = this.deps.store.getRoomKey(chainId, roomId);
+    const resolved = this.deps.store.resolvedRoles.get(roomKey);
+    if (!resolved || resolved.size === 0) return [];
+
+    const flagsByAddr = new Map(players.map((p) => [p.wallet.toLowerCase(), p.flags]));
+    return Promise.all(
+      [...myByAddr.values()].map((w) =>
+        this.doConfirmRole({
+          chain,
+          roomId: roomIdBig,
+          roomIdStr: roomId,
+          wallet: w,
+          role: (resolved.get(w.address.toLowerCase()) ?? Role.NONE) as Role,
+          alreadyConfirmed: ((flagsByAddr.get(w.address.toLowerCase()) ?? 0) & FLAGS.CONFIRMED_ROLE) !== 0,
+          log,
+        }).catch((err) => ({
+          agent: w.address,
+          status: "failed" as const,
+          err: String(err?.message ?? err),
+        }))
+      )
+    );
   }
 
   private async doConfirmRole(args: {
