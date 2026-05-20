@@ -66,7 +66,7 @@ import {
 } from "./llm-chat-call.js";
 import { loadMemoryPromptLines } from "./memory.js";
 
-const PHASE_DAY = 2;
+const PHASE_DAY = 3; // GamePhase.DAY (was 2/REVEAL — bug: handler skipped every real DAY)
 const FLAG_ACTIVE = 0x2;
 const ZERO_BYTES32: Hex =
   "0x0000000000000000000000000000000000000000000000000000000000000000";

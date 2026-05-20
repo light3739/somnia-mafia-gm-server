@@ -24,7 +24,7 @@ import {
 import { setAgentRole, AgentRole } from "../../src/agents/roles.js";
 import { computeMessageHash, makePhaseId, MSG_KIND_REGULAR, SCRUB_VERSION } from "../../src/agents/trace.js";
 
-const PHASE_DAY = 2;
+const PHASE_DAY = 3; // GamePhase.DAY (contract enum)
 const PHASE_NIGHT = 5;
 const FLAG_ACTIVE = 0x2;
 const ZERO_BYTES32: Hex =
@@ -285,6 +285,44 @@ describe("DayHandler — happy path", () => {
     expect(chain.sendCommitCalls.length).toBe(4);
     expect(ws.calls.length).toBe(4);
     expect(ws.calls[0].event).toMatchObject({ type: "agent-chat", text: "I think B is suspicious." });
+  });
+});
+
+describe("DayHandler — phase gate pinned to contract GamePhase (regression)", () => {
+  // GamePhase enum (src/types/contract.ts): REVEAL=2, DAY=3. The handler's
+  // PHASE_DAY constant was 2 (REVEAL) so it skipped every real DAY — agents
+  // were mute in DAY. These pin the gate to the literal contract values so it
+  // can't silently regress regardless of the local PHASE_DAY symbol.
+  const LITERAL_DAY = 3;
+  const LITERAL_REVEAL = 2;
+
+  it("ACTS when room phase is DAY (3): agent commits", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const chain = makeChain({ alive: [a0], agentAddrs: [a0], phaseSequence: [LITERAL_DAY] });
+    const h = new DayHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      ws: makeBroadcaster(),
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: makeInferFn({ response: "hello all" }),
+    });
+    const outcomes = await h.handle(makeEvent());
+    expect(outcomes).toHaveLength(1);
+    expect(chain.sendCommitCalls.length).toBe(1); // not skipped for phase
+  });
+
+  it("SKIPS when room phase is REVEAL (2): no commit", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const chain = makeChain({ alive: [a0], agentAddrs: [a0], phaseSequence: [LITERAL_REVEAL] });
+    const h = new DayHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      ws: makeBroadcaster(),
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: makeInferFn({ response: "hello all" }),
+    });
+    const outcomes = await h.handle(makeEvent());
+    expect(chain.sendCommitCalls.length).toBe(0); // skipped — wrong phase
   });
 });
 
