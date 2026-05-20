@@ -24,6 +24,7 @@ import { loadOrGenerateMnemonic } from "./wallets.js";
 import { wsManager } from "../ws/wsManager.js";
 import type { GMStore } from "../stores/index.js";
 import { recordAgentNightAction } from "./night-action-bridge.js";
+import { registerOnResolved } from "../services/roleResolution.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -153,6 +154,16 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     txGasPriceGwei: Number(process.env.TX_GAS_PRICE_GWEI ?? "10"),
     shareKeysOnChain:
       (process.env.AGENTS_SHARE_KEYS_ONCHAIN ?? "").toLowerCase() === "true",
+    store,
+  });
+
+  // Mixed games: when the GM resolves roles (after the human submits the last
+  // SRA key), confirm our agents' roles. Fire-and-forget — must not block the
+  // HTTP path or the event listener.
+  registerOnResolved((chainId, roomId) => {
+    preGameHandler
+      .confirmResolvedRoles(chainId, roomId)
+      .catch((err) => logger.error({ err, chainId, roomId }, "[agents] confirmResolvedRoles threw"));
   });
 
   // 4d DAY chat — opt-in via AGENTS_DAY_ENABLED. Skipped (no listener wire)
