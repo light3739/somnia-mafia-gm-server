@@ -5,15 +5,13 @@ import { Router } from 'express';
 import { getRoom, getPlayers, getChainConfig, DIAMOND_ABI, FLAGS, GamePhase } from '../chain.js';
 import { Role } from '../types/contract.js';
 import { eciesEncrypt } from '../ecies.js';
-import { resolveRolesFromDeck } from '../agents/role-resolve.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
-import { syncAgentRolesFromResolvedRoles } from '../agents/role-sync.js';
+import { submitSraKey } from '../services/roleResolution.js';
 
 import { logger } from '../utils/logger.js';
-import { wsManager } from '../ws/wsManager.js';
 
 export interface EciesRoutesContext {
   store: GMStore;
@@ -69,67 +67,29 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
       });
       if (!sigCheck.ok) return res.status(sigCheck.status || 401).json({ error: sigCheck.error });
 
-      const roomKey = store.getRoomKey(Number(chainId), String(roomId));
-      const roomSraKeys = store.getRoomMap(store.sraSKeys, roomKey);
-      const normalizedPlayer = String(playerAddress).toLowerCase();
-      roomSraKeys.set(normalizedPlayer, String(sraKey));
-      const { rPersistSraKey, rPersistRole, rPersistRoomChain } = await import('../redis.js');
-      if (redis) {
-        rPersistSraKey(redis, Number(chainId), String(roomId), normalizedPlayer, String(sraKey));
-        rPersistRoomChain(redis, Number(chainId), String(roomId));
-      }
+      await submitSraKey(
+        {
+          store,
+          redis,
+          chainId: Number(chainId),
+          roomId: String(roomId),
+          fetchPlayers: async () =>
+            (await getPlayers(BigInt(roomId), chainId)).map((p) => ({ wallet: p.wallet })),
+          fetchDeck: async () => {
+            const { public: pc, diamond } = getChainConfig(chainId);
+            return (await pc.readContract({
+              address: diamond,
+              abi: DIAMOND_ABI,
+              functionName: "getDeck",
+              args: [BigInt(roomId)],
+            })) as string[];
+          },
+        },
+        String(playerAddress),
+        String(sraKey)
+      );
 
-      logger.info({ roomId, player: normalizedPlayer, chainId }, '[submit-sra-key] SRA key updated');
-
-      // Try pre-cache
-      const players = await getPlayers(BigInt(roomId), chainId);
-      
-      // We need keys from all players since the sequential shuffle requires everyone's SRA key.
-      // (The DECK_COMMITTED flag might have been cleared by the final revealDeck transaction).
-      const shufflerAddrs = players.map(p => p.wallet.toLowerCase());
-      const missingKeys = shufflerAddrs.filter(addr => !roomSraKeys.has(addr));
-
-      if (shufflerAddrs.length > 0 && missingKeys.length === 0) {
-        logger.info({ roomId, shufflersCount: shufflerAddrs.length }, '[ECIES] All SRA keys received. Resolving roles...');
-        const { public: publicClient, diamond } = getChainConfig(chainId);
-        const deck = await publicClient.readContract({ address: diamond, abi: DIAMOND_ABI, functionName: 'getDeck', args: [BigInt(roomId)] }) as string[];
-        
-        const allKeys = shufflerAddrs.map(addr => roomSraKeys.get(addr)).filter(Boolean) as string[];
-        const roomRoles = store.getRoomMap(store.resolvedRoles, roomKey);
-        
-        // Final mapping uses all players (even if they didn't shuffle, they get a card index)
-        const allAddrsInOrder = (store.roomPlayerOrder.get(roomKey) || players.map(p => p.wallet.toLowerCase())) as string[];
-
-        // Shared with the headless agent pre-game (4j) so both paths decode roles
-        // identically — see agents/role-resolve.ts (no HTTP self-call).
-        const resolved = resolveRolesFromDeck(deck, allAddrsInOrder, allKeys, roomId);
-        for (const [addr, role] of resolved) {
-          if (role === Role.NONE) {
-            logger.warn({ player: addr, source: deck[allAddrsInOrder.indexOf(addr)] }, '[ECIES] Role resolution failed');
-          } else {
-            logger.info({ player: addr, role: Role[role] }, '[ECIES] Role resolved');
-          }
-          roomRoles.set(addr, role);
-          if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr, role);
-        }
-        // Register mafia members for filtered WS relay (mafia-chat)
-        const mafiaAddrs = allAddrsInOrder.filter(addr => roomRoles.get(addr.toLowerCase()) === Role.MAFIA);
-        wsManager.setRoomMafia(String(roomId), Number(chainId), mafiaAddrs);
-
-        if (redis) {
-          await syncAgentRolesFromResolvedRoles(redis, Number(chainId), String(roomId), roomRoles);
-        }
-
-        // Push role-ready to each player via WS
-        for (const addr of allAddrsInOrder) {
-          wsManager.sendToPlayer(addr, {
-            type: 'role-ready',
-            data: { playerAddress: addr.toLowerCase() },
-          });
-        }
-      } else if (shufflerAddrs.length > 0) {
-        logger.info({ roomId, missingFrom: missingKeys }, '[ECIES] Waiting for more SRA keys');
-      }
+      logger.info({ roomId, player: String(playerAddress).toLowerCase(), chainId }, "[submit-sra-key] SRA key submitted");
       return res.json({ ok: true });
     } catch (err: any) {
       logger.error({ err, roomId: req.body?.roomId }, '[submit-sra-key] Internal error');
