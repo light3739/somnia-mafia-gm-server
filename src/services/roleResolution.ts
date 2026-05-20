@@ -61,9 +61,12 @@ export async function submitSraKey(
 /** Resolve roles iff every player's key is present. Idempotent; fires onResolved once. */
 export async function maybeResolveRoles(ctx: ResolveCtx): Promise<void> {
   const roomKey = ctx.store.getRoomKey(ctx.chainId, ctx.roomId);
-  const existing = ctx.store.resolvedRoles.get(roomKey);
-  if (existing && existing.size > 0) return; // already resolved
 
+  // Fast-path: already resolved before any awaits.
+  const existing = ctx.store.resolvedRoles.get(roomKey);
+  if (existing && existing.size > 0) return;
+
+  // --- async pre-checks (window where concurrency can slip through) ---
   const roomSra = ctx.store.getRoomMap(ctx.store.sraSKeys, roomKey);
   const players = await ctx.fetchPlayers();
   const addrs = players.map((p) => p.wallet.toLowerCase());
@@ -72,18 +75,31 @@ export async function maybeResolveRoles(ctx: ResolveCtx): Promise<void> {
   const deck = await ctx.fetchDeck();
   if (deck.length === 0) return;
 
+  // --- synchronous critical section: re-check + claim atomically ---
+  // A concurrent caller may have resolved while we were awaiting above.
+  // getRoomMap ensures the nested Map exists; if it already has entries,
+  // this invocation lost the race and must bail.
+  const roomRoles = ctx.store.getRoomMap(ctx.store.resolvedRoles, roomKey);
+  if (roomRoles.size > 0) return; // lost the race — bail before any side-effects
+
   const order = (ctx.store.roomPlayerOrder.get(roomKey) as string[] | undefined) || addrs;
   const allKeys = addrs.map((a) => roomSra.get(a)!).filter(Boolean) as string[];
   const resolved = resolveRolesFromDeck(deck, order, allKeys, ctx.roomId);
 
-  const roomRoles = ctx.store.getRoomMap(ctx.store.resolvedRoles, roomKey);
+  // Populate the map synchronously — no await between re-check and this loop,
+  // so no concurrent caller can slip past the size>0 guard above.
   for (const [addr, role] of resolved) {
     if (role === Role.NONE) {
       logger.warn({ player: addr, roomId: ctx.roomId }, "[roleResolution] role resolved to NONE");
     }
     roomRoles.set(addr, role);
-    if (ctx.redis) {
-      const { rPersistRole } = await import("../redis.js");
+  }
+  // roomRoles is now fully populated; concurrent callers will see size > 0 and bail.
+
+  // --- async side-effects (safe: room is already claimed) ---
+  if (ctx.redis) {
+    const { rPersistRole } = await import("../redis.js");
+    for (const [addr, role] of resolved) {
       rPersistRole(ctx.redis, ctx.chainId, ctx.roomId, addr, role);
     }
   }

@@ -115,4 +115,32 @@ describe("roleResolution.submitSraKey / maybeResolveRoles", () => {
 
     expect(onResolved).toHaveBeenCalledTimes(1);
   });
+
+  it("concurrent final-key submissions fire onResolved exactly once (no race)", async () => {
+    const { enc, dByAddr } = dealMixed();
+    const ctx = makeCtx(store, redis, enc);
+    const onResolved = vi.fn();
+    registerOnResolved(onResolved);
+
+    // Submit first N-1 keys sequentially
+    await submitSraKey(ctx, ADDRS[0], dByAddr.get(ADDRS[0].toLowerCase())!);
+    await submitSraKey(ctx, ADDRS[1], dByAddr.get(ADDRS[1].toLowerCase())!);
+
+    // Submit the final key twice concurrently — simulates HTTP + agent race
+    const last = ADDRS[2];
+    const d = dByAddr.get(last.toLowerCase())!;
+    await Promise.all([
+      submitSraKey(ctx, last, d),
+      submitSraKey(ctx, last, d),
+    ]);
+
+    // onResolved must fire exactly once
+    expect(onResolved).toHaveBeenCalledTimes(1);
+    expect(onResolved).toHaveBeenCalledWith(CHAIN_ID, ROOM);
+
+    // resolvedRoles must have exactly N=3 entries
+    const roomKey = store.getRoomKey(CHAIN_ID, ROOM);
+    const roles = store.resolvedRoles.get(roomKey)!;
+    expect(roles.size).toBe(3);
+  });
 });
