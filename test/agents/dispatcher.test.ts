@@ -7,7 +7,7 @@
  *   - cursor (lastBlock) is written after a successful dispatch
  *   - each event.type hits its routing branch without error (skeleton stubs)
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { AgentDispatcher } from "../../src/agents/dispatcher.js";
 import { eventProcessedKey, lastBlockKey } from "../../src/agents/redis-keys.js";
 import type { AgentEvent } from "../../src/agents/events.js";
@@ -182,5 +182,91 @@ describe("AgentDispatcher", () => {
 
     // Cursor advanced to the last block we dispatched
     expect(await redis.get(lastBlockKey(50312, DIAMOND))).toBe("13");
+  });
+});
+
+describe("AgentDispatcher pre-game routing", () => {
+  let redis: FakeRedis;
+  beforeEach(() => {
+    redis = new FakeRedis();
+  });
+
+  function gameStarted(over: Partial<AgentEvent> = {}): AgentEvent {
+    return {
+      type: "GAME_STARTED",
+      chainId: 50312,
+      roomId: "9",
+      phaseId: "SHUFFLING",
+      blockNumber: 50,
+      txHash: TX_A,
+      logIndex: 0,
+      ...(over as any),
+    } as AgentEvent;
+  }
+  function deckRevealed(over: Partial<AgentEvent> = {}): AgentEvent {
+    return {
+      type: "DECK_REVEALED",
+      chainId: 50312,
+      roomId: "9",
+      phaseId: "SHUFFLING",
+      blockNumber: 51,
+      txHash: TX_A,
+      logIndex: 1,
+      ...(over as any),
+    } as AgentEvent;
+  }
+  function build(preGameHandler: any) {
+    return new AgentDispatcher({
+      redis: redis as any,
+      diamondByChain: new Map([[50312, DIAMOND]]),
+      preGameHandler,
+    });
+  }
+
+  it("routes GAME_STARTED → handleShuffling then handleReveal", async () => {
+    const handleShuffling = vi.fn(async () => []);
+    const handleReveal = vi.fn(async () => []);
+    const out = await build({ handleShuffling, handleReveal }).dispatch(gameStarted());
+    expect(out.kind).toBe("dispatched");
+    expect(handleShuffling).toHaveBeenCalledWith({ chainId: 50312, roomId: "9" });
+    expect(handleReveal).toHaveBeenCalledWith({ chainId: 50312, roomId: "9" });
+  });
+
+  it("routes DECK_REVEALED → pre-game (re-entry / advance trigger)", async () => {
+    const handleShuffling = vi.fn(async () => []);
+    const handleReveal = vi.fn(async () => []);
+    await build({ handleShuffling, handleReveal }).dispatch(deckRevealed());
+    expect(handleShuffling).toHaveBeenCalledTimes(1);
+    expect(handleReveal).toHaveBeenCalledTimes(1);
+  });
+
+  it("serialises pre-game per room — no concurrent shuffle", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const handleShuffling = vi.fn(async () => {
+      active++;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 10));
+      active--;
+      return [];
+    });
+    const handleReveal = vi.fn(async () => []);
+    const dispatcher = build({ handleShuffling, handleReveal });
+    await Promise.all([
+      dispatcher.dispatch(gameStarted({ logIndex: 0 })),
+      dispatcher.dispatch(deckRevealed({ logIndex: 1 })),
+    ]);
+    expect(maxActive).toBe(1); // mutex held — turns ran one at a time
+    expect(handleShuffling).toHaveBeenCalledTimes(2);
+    expect(handleReveal).toHaveBeenCalledTimes(2);
+  });
+
+  it("a throwing pre-game handler does not reject dispatch", async () => {
+    const handleShuffling = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    const handleReveal = vi.fn(async () => []);
+    const out = await build({ handleShuffling, handleReveal }).dispatch(gameStarted());
+    expect(out.kind).toBe("dispatched"); // error swallowed, listener stays alive
   });
 });

@@ -64,6 +64,7 @@ import {
   inferChatOnSomnia as defaultInferChatFn,
   type InferChatResult,
 } from "./llm-chat-call.js";
+import { loadMemoryPromptLines } from "./memory.js";
 
 const PHASE_DAY = 2;
 const FLAG_ACTIVE = 0x2;
@@ -166,6 +167,7 @@ export interface DayPromptArgs {
   persona: string;
   alive: Address[];
   recentChat: string[];
+  privateMemory?: string[];
   dayNumber: number;
   language: string;
 }
@@ -183,12 +185,16 @@ export function buildDayPrompt(args: DayPromptArgs): {
     roleLine,
     `Reply in ${args.language} with ONE short line (1-2 sentences). No markdown. No role names.`,
   ].join(" ");
+  const privateMemory = args.privateMemory ?? [];
   const user = [
     `Day ${args.dayNumber}.`,
     `Alive players: ${args.alive.join(", ")}.`,
     args.recentChat.length === 0
       ? `No previous messages yet.`
       : `Recent chat:\n${args.recentChat.join("\n")}`,
+    privateMemory.length === 0
+      ? `No private verified memory.`
+      : `Private verified memory (use silently; do not quote or reveal role actions):\n${privateMemory.join("\n")}`,
     `Say one short in-character line.`,
   ].join("\n");
   return { roles: ["system", "user"], messages: [system, user] };
@@ -378,6 +384,12 @@ export class DayHandler {
       -20,
       -1
     );
+    const privateMemory = await loadMemoryPromptLines(
+      this.deps.redis,
+      chain.chainId,
+      event.roomId,
+      wallet.address
+    ).catch(() => []);
 
     // 5. Persist PENDING_INFERENCE.
     await this.persistTrace(chain.chainId, event, wallet.address, {
@@ -394,6 +406,7 @@ export class DayHandler {
       persona,
       alive: aliveAddrs,
       recentChat,
+      privateMemory,
       dayNumber: event.dayNumber,
       language: this.language,
     });

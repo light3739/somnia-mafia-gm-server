@@ -25,12 +25,18 @@ import { logger } from "../utils/logger.js";
 import {
   AGENT_REGISTRY_ABI,
   DIAMOND_VOTE_ABI,
+  PREGAME_ABI,
 } from "./registry-abi.js";
 import type {
   PlayerSnapshot,
   RoomSnapshot,
   VoteChainOps,
 } from "./voting.js";
+import type {
+  PlayerPregameSnapshot,
+  PreGameChainOps,
+  RoomPregameSnapshot,
+} from "./pregame.js";
 
 /**
  * 4d DAY chat — chain-side methods the DayHandler needs in addition to the
@@ -235,15 +241,144 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
     },
 
     async getSponsorBalanceWei() {
-      const sponsorEnv = process.env.AGENT_SPONSOR_PRIVATE_KEY;
-      if (!sponsorEnv) return 0n;
-      // Derive sponsor address from PK without importing crypto helpers here:
-      // chain.ts is the canonical place — we rely on sponsor.ts to surface the addr.
-      // For balance probe we re-use the sponsor address that voted/funded the agents.
-      // Fall back to deployer address if SPONSOR address resolution module is unavailable.
-      const sponsorAddr = process.env.AGENT_SPONSOR_ADDRESS as Address | undefined;
-      if (!sponsorAddr) return 0n;
-      return publicClient.getBalance({ address: sponsorAddr });
+      // Re-export of the canonical sponsor balance probe from sponsor.ts.
+      // Imported lazily to avoid circular import (sponsor.ts depends on chain.ts).
+      const { getSponsorBalance } = await import("./sponsor.js");
+      return getSponsorBalance(chainId);
+    },
+  };
+}
+
+/**
+ * 4j pre-game chain ops — real viem wiring for PreGameHandler. Mirrors
+ * makeVoteChainOps: reads off the shared publicClient, each write builds a
+ * per-agent walletClient (own nonce stream) and asserts the receipt succeeded.
+ */
+export function makePreGameChainOps(chainId: number): PreGameChainOps {
+  const { public: publicClient, diamond } = getChainConfig(chainId);
+  const chainObj = publicClient.chain as Chain | undefined;
+  if (!chainObj) {
+    throw new Error(`[agents/chain-ops] chain ${chainId} publicClient has no .chain`);
+  }
+  const rpcUrl = chainObj.rpcUrls.default.http[0];
+  // No return annotation: the inferred concrete client keeps `chain` bound so
+  // writeContract doesn't demand it per-call (mirrors makeVoteChainOps).
+  const walletFor = (agent: HDAccount) =>
+    createWalletClient({ account: agent, chain: chainObj, transport: http(rpcUrl) });
+
+  return {
+    chainId,
+    diamond,
+
+    async getRoom(roomId): Promise<RoomPregameSnapshot> {
+      const room: any = await publicClient.readContract({
+        address: diamond,
+        abi: DIAMOND_VOTE_ABI,
+        functionName: "getRoom",
+        args: [roomId],
+      });
+      return {
+        phase: Number(room.phase),
+        playersCount: Number(room.playersCount),
+        aliveCount: Number(room.aliveCount),
+        currentShufflerIndex: Number(room.currentShufflerIndex),
+        confirmedCount: Number(room.confirmedCount),
+        keysSharedCount: Number(room.keysSharedCount),
+        revealedCount: Number(room.revealedCount),
+        phaseDeadline: Number(room.phaseDeadline),
+      };
+    },
+
+    async getPlayers(roomId): Promise<readonly PlayerPregameSnapshot[]> {
+      const players: any = await publicClient.readContract({
+        address: diamond,
+        abi: DIAMOND_VOTE_ABI,
+        functionName: "getPlayers",
+        args: [roomId],
+      });
+      return players.map((p: any) => ({
+        wallet: p.wallet as Address,
+        flags: Number(p.flags),
+        publicKey: (p.publicKey ?? "0x") as Hex,
+      }));
+    },
+
+    async getDeck(roomId): Promise<string[]> {
+      return publicClient.readContract({
+        address: diamond,
+        abi: PREGAME_ABI,
+        functionName: "getDeck",
+        args: [roomId],
+      }) as Promise<string[]>;
+    },
+
+    async isAgent(roomId, addr) {
+      return publicClient.readContract({
+        address: diamond,
+        abi: AGENT_REGISTRY_ABI,
+        functionName: "isAgent",
+        args: [roomId, addr],
+      }) as Promise<boolean>;
+    },
+
+    async sendStartGame(host, roomId, gasPriceGwei) {
+      const hash = await walletFor(host).writeContract({
+        address: diamond,
+        abi: PREGAME_ABI,
+        functionName: "startGame",
+        args: [roomId],
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "startGame");
+      return hash;
+    },
+
+    async sendCommitDeck(agent, roomId, deckHash, gasPriceGwei) {
+      const hash = await walletFor(agent).writeContract({
+        address: diamond,
+        abi: PREGAME_ABI,
+        functionName: "commitDeck",
+        args: [roomId, deckHash],
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "commitDeck");
+      return hash;
+    },
+
+    async sendRevealDeck(agent, roomId, deck, salt, gasPriceGwei) {
+      const hash = await walletFor(agent).writeContract({
+        address: diamond,
+        abi: PREGAME_ABI,
+        functionName: "revealDeck",
+        args: [roomId, deck, salt],
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "revealDeck");
+      return hash;
+    },
+
+    async sendShareKeys(agent, roomId, recipients, encryptedKeys, gasPriceGwei) {
+      const hash = await walletFor(agent).writeContract({
+        address: diamond,
+        abi: PREGAME_ABI,
+        functionName: "shareKeysToAll",
+        args: [roomId, recipients, encryptedKeys],
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "shareKeysToAll");
+      return hash;
+    },
+
+    async sendCommitAndConfirmRole(agent, roomId, roleHash, gasPriceGwei) {
+      const hash = await walletFor(agent).writeContract({
+        address: diamond,
+        abi: PREGAME_ABI,
+        functionName: "commitAndConfirmRole",
+        args: [roomId, roleHash],
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "commitAndConfirmRole");
+      return hash;
     },
   };
 }

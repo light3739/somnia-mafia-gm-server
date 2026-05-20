@@ -80,6 +80,22 @@ export const AGENT_REGISTRY_WRITE_ABI = parseAbi([
 ]);
 
 /**
+ * 4j pre-game surface — ShuffleFacet (deck commit/reveal, key sharing, role
+ * confirmation) + LobbyFacet startGame/getDeck. getRoom/getPlayers (full struct,
+ * incl. currentShufflerIndex + publicKey) are reused from DIAMOND_VOTE_ABI;
+ * isAgent from AGENT_REGISTRY_ABI. Signatures verified against
+ * SomniaSol/contracts/facets/{ShuffleFacet,LobbyFacet}.sol.
+ */
+export const PREGAME_ABI = parseAbi([
+  "function startGame(uint256 roomId)",
+  "function commitDeck(uint256 roomId, bytes32 deckHash)",
+  "function revealDeck(uint256 roomId, string[] deck, string salt)",
+  "function shareKeysToAll(uint256 roomId, address[] recipients, bytes[] encryptedKeys)",
+  "function commitAndConfirmRole(uint256 roomId, bytes32 roleHash)",
+  "function getDeck(uint256 roomId) view returns (string[])",
+]);
+
+/**
  * Compute the actionHash bound into the vote trace. The exact bytes are not
  * defined on chain (`AgentRegistryFacet.commitAgentInference` accepts an
  * opaque bytes32) but we standardise here so audit tools can recompute it

@@ -19,6 +19,8 @@ import { normaliseLog } from "./events.js";
 import type { AgentDispatcher } from "./dispatcher.js";
 
 const PHASE_TRANSITION_EVENTS = [
+  "GameStarted", // 4j pre-game kickoff (→ SHUFFLING)
+  "DeckRevealed", // 4j shuffle advance / REVEAL trigger
   "DayStarted",
   "VotingStarted",
   "NightStarted",
@@ -79,11 +81,12 @@ export class AgentEventListener {
       return;
     }
 
-    // Resolve dayNumber for events that don't carry it in their ABI.
+    // Resolve dayNumber only for the two events whose ABI lacks it AND whose
+    // normaliser needs it (VotingStarted / NightStarted). DayStarted reads it
+    // straight from its own args; GameStarted / DeckRevealed / GameEnded don't
+    // use it — so we skip the getRoom round-trip (DeckRevealed fires often).
     let dayNumber: number | undefined;
-    if (eventName === "DayStarted") {
-      dayNumber = Number(log.args?.dayNumber ?? 0);
-    } else if (eventName !== "GameEnded") {
+    if (eventName === "VotingStarted" || eventName === "NightStarted") {
       const roomId = (log.args?.roomId as bigint | undefined) ?? null;
       if (roomId != null) {
         try {

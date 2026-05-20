@@ -124,6 +124,7 @@ export function buildVotePrompt(args: {
   self: Address;
   alive: Address[];
   publicChat: { from: Address; text: string }[];
+  privateMemory?: string[];
   dayCount: number;
   language?: string;
 }): { prompt: string; system: string; allowedValues: string[] } {
@@ -133,12 +134,13 @@ export function buildVotePrompt(args: {
     .slice(-15)
     .map((m) => `${m.from.slice(0, 6)}…: ${m.text}`)
     .join("\n");
+  const privateMemory = args.privateMemory ?? [];
 
   return {
     system: [
       `You are a player in an on-chain Mafia game. Your wallet is ${args.self}.`,
       `Decide who to vote out today. Respond with EXACTLY one wallet address from the allowed list — no commentary, no prose.`,
-      `If unsure, pick the most suspicious player based on the public chat. Never vote for yourself.`,
+      `Use private verified memory silently when choosing, but never quote it. If unsure, pick the most suspicious player based on the public chat. Never vote for yourself.`,
       `Reply language: ${lang}.`,
     ].join(" "),
     prompt: [
@@ -146,6 +148,9 @@ export function buildVotePrompt(args: {
       `Alive players (not you): ${others.join(", ")}`,
       `Recent public chat:`,
       chatLines || "(no messages yet)",
+      privateMemory.length === 0
+        ? `Private verified memory: (none)`
+        : `Private verified memory:\n${privateMemory.join("\n")}`,
       ``,
       `Reply with one address from the allowed list. Address only.`,
     ].join("\n"),

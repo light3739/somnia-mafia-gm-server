@@ -115,7 +115,7 @@ async function start() {
   LogListener.start();
 
   // Agent subsystem — opt-in via AGENTS_ENABLED=true. No-op otherwise.
-  await startAgentSubsystem();
+  await startAgentSubsystem(store);
 
   // HTTP + WebSocket on the same port
   const httpServer = createServer(app);

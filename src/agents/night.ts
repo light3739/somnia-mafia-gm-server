@@ -67,6 +67,11 @@ import {
   type NightActionKind,
 } from "./registry-abi.js";
 import { AgentRole, getAgentRole, roleLabel } from "./roles.js";
+import type {
+  AgentNightActionRecord,
+  AgentNightActionRecordResult,
+  GmNightActionType,
+} from "./night-action-bridge.js";
 
 const FLAG_ACTIVE = 0x2;
 const PHASE_NIGHT = 5;
@@ -138,6 +143,10 @@ export interface NightHandlerDeps {
   language?: string;
   /** Inject a fake inferToolsChat for tests. */
   inferToolsFn?: InferToolsFn;
+  /** Optional bridge into the GM night-state aggregator. */
+  recordNightAction?: (
+    record: AgentNightActionRecord
+  ) => Promise<AgentNightActionRecordResult | void>;
 }
 
 export type NightOutcomeStatus =
@@ -158,6 +167,7 @@ export interface AgentNightOutcome {
   commitTxHash?: Hex;
   llmTxHash?: Hex;
   decisionSource?: "llm" | "fallback" | "skip";
+  nightActionRecorded?: boolean;
   err?: string;
 }
 
@@ -325,6 +335,19 @@ function deterministicPick(
   )[0];
 }
 
+function toGmNightAction(kind: NightActionKind): GmNightActionType {
+  switch (kind) {
+    case "KILL":
+      return "kill";
+    case "HEAL":
+      return "heal";
+    case "CHECK":
+      return "check";
+    default:
+      return "skip";
+  }
+}
+
 export interface NightPromptArgs {
   self: Address;
   role: AgentRole;
@@ -388,6 +411,70 @@ export class NightHandler {
     this.txGasPriceGwei = deps.txGasPriceGwei ?? 10;
     this.inferToolsFn = deps.inferToolsFn ?? defaultInferToolsFn;
     this.language = deps.language ?? "English";
+  }
+
+  private async recordNightActionSafe(
+    record: AgentNightActionRecord,
+    log: typeof logger
+  ): Promise<boolean> {
+    if (!this.deps.recordNightAction) return false;
+    try {
+      const result = await this.deps.recordNightAction(record);
+      return result?.recorded ?? true;
+    } catch (err: any) {
+      log.error(
+        { err: String(err?.message ?? err), action: record.actionType, target: record.targetAddress },
+        "[agents/night] failed to bridge action into GM night state"
+      );
+      return false;
+    }
+  }
+
+  private async replayNightActionFromTrace(args: {
+    chain: NightChainOps;
+    wallet: AgentWallet;
+    event: NightStartedEvent;
+    dayCount: number;
+    log: typeof logger;
+  }): Promise<boolean> {
+    if (!this.deps.recordNightAction) return false;
+    const raw = await this.deps.redis.get(
+      agentTraceKey(
+        args.chain.chainId,
+        args.event.roomId,
+        args.event.phaseId,
+        args.wallet.address
+      )
+    );
+    if (!raw) return false;
+    try {
+      const trace = JSON.parse(raw) as {
+        action?: NightActionKind;
+        target?: Address;
+        source?: string;
+        commitTxHash?: Hex | null;
+      };
+      if (!trace.action || !trace.target) return false;
+      return this.recordNightActionSafe(
+        {
+          chainId: args.chain.chainId,
+          roomId: args.event.roomId,
+          dayCount: args.dayCount,
+          playerAddress: args.wallet.address,
+          actionType: toGmNightAction(trace.action),
+          targetAddress: trace.target,
+          source: trace.source,
+          commitTxHash: trace.commitTxHash,
+        },
+        args.log
+      );
+    } catch (err: any) {
+      args.log.warn(
+        { err: String(err?.message ?? err) },
+        "[agents/night] could not replay bridged night action from trace"
+      );
+      return false;
+    }
   }
 
   async handle(event: NightStartedEvent): Promise<AgentNightOutcome[]> {
@@ -533,7 +620,18 @@ export class NightHandler {
     );
     if (claimed !== "OK") {
       log.info("[agents/night] action key already held — skipping");
-      return { agent: wallet.address, status: "skipped-action-idempotent" };
+      const replayed = await this.replayNightActionFromTrace({
+        chain,
+        wallet,
+        event,
+        dayCount,
+        log,
+      });
+      return {
+        agent: wallet.address,
+        status: "skipped-action-idempotent",
+        nightActionRecorded: replayed,
+      };
     }
 
     // 3. On-chain commitment existence check (belt + braces).
@@ -548,7 +646,18 @@ export class NightHandler {
         { existingCommit },
         "[agents/night] trace already committed on chain — skipping"
       );
-      return { agent: wallet.address, status: "skipped-already-committed" };
+      const replayed = await this.replayNightActionFromTrace({
+        chain,
+        wallet,
+        event,
+        dayCount,
+        log,
+      });
+      return {
+        agent: wallet.address,
+        status: "skipped-already-committed",
+        nightActionRecorded: replayed,
+      };
     }
 
     // 4. Load role. Citizens / unassigned → deterministic SKIP path.
@@ -674,6 +783,20 @@ export class NightHandler {
       IDEMPOTENCY_TTL_SECONDS
     );
 
+    const nightActionRecorded = await this.recordNightActionSafe(
+      {
+        chainId: chain.chainId,
+        roomId: event.roomId,
+        dayCount: event.dayNumber,
+        playerAddress: wallet.address,
+        actionType: "skip",
+        targetAddress: ZERO_ADDR,
+        source: "skip",
+        commitTxHash,
+      },
+      log
+    );
+
     return {
       agent: wallet.address,
       status: "committed",
@@ -682,6 +805,7 @@ export class NightHandler {
       target: ZERO_ADDR,
       decisionSource: "skip",
       commitTxHash,
+      nightActionRecorded,
     };
   }
 
@@ -862,6 +986,22 @@ export class NightHandler {
       IDEMPOTENCY_TTL_SECONDS
     );
 
+    const nightActionRecorded = commitTxHash
+      ? await this.recordNightActionSafe(
+          {
+            chainId: chain.chainId,
+            roomId: event.roomId,
+            dayCount,
+            playerAddress: wallet.address,
+            actionType: toGmNightAction(decision.kind),
+            targetAddress: decision.target,
+            source: decision.source,
+            commitTxHash,
+          },
+          log
+        )
+      : false;
+
     return commitTxHash
       ? {
           agent: wallet.address,
@@ -872,6 +1012,7 @@ export class NightHandler {
           commitTxHash,
           llmTxHash: infer.txHash,
           decisionSource: decision.source,
+          nightActionRecorded,
         }
       : {
           agent: wallet.address,

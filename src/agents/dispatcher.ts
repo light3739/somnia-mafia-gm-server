@@ -14,11 +14,13 @@
  */
 import type { Redis } from "ioredis";
 import type { Hex } from "viem";
+import { Mutex } from "async-mutex";
 import { logger } from "../utils/logger.js";
 import type { AgentEvent } from "./events.js";
 import type { VotingHandler, VotingStartedEvent } from "./voting.js";
 import type { NightHandler, NightStartedEvent } from "./night.js";
 import type { DayHandler, DayStartedEvent } from "./day.js";
+import type { PreGameHandler } from "./pregame.js";
 import {
   eventProcessedKey,
   lastBlockKey,
@@ -34,6 +36,8 @@ export type DispatcherDeps = {
   nightHandler?: NightHandler;
   /** Optional: when wired, DAY_STARTED is routed here. Skipped otherwise. */
   dayHandler?: DayHandler;
+  /** Optional: when wired, GAME_STARTED / DECK_REVEALED drive the pre-game. */
+  preGameHandler?: PreGameHandler;
 };
 
 export type DispatchOutcome =
@@ -42,7 +46,51 @@ export type DispatchOutcome =
   | { kind: "skipped"; reason: string };
 
 export class AgentDispatcher {
+  /** Per-room mutex so the pre-game (sequential by nature) never runs twice
+   *  concurrently for one room — see runPreGame. */
+  private readonly preGameMutexes = new Map<string, Mutex>();
+
   constructor(private readonly deps: DispatcherDeps) {}
+
+  private mutexFor(roomKey: string): Mutex {
+    let m = this.preGameMutexes.get(roomKey);
+    if (!m) {
+      m = new Mutex();
+      this.preGameMutexes.set(roomKey, m);
+    }
+    return m;
+  }
+
+  /**
+   * Drive the pre-game for one room, serialised. GAME_STARTED kicks it off; the
+   * burst of DeckRevealed logs (incl. our own reveal txs) re-enter here and
+   * either advance the next shuffle turn or — once the contract has flipped to
+   * REVEAL (which emits no event of its own) — resolve roles + confirm. Both
+   * handlers are idempotent against on-chain flags, so re-entry is safe.
+   */
+  private async runPreGame(event: AgentEvent): Promise<void> {
+    const pg = this.deps.preGameHandler;
+    if (!pg) return;
+    const pgEvent = { chainId: event.chainId, roomId: event.roomId };
+    await this.mutexFor(`${event.chainId}:${event.roomId}`).runExclusive(async () => {
+      await pg
+        .handleShuffling(pgEvent)
+        .catch((err) =>
+          logger.error(
+            { err, roomId: event.roomId },
+            "[agents] preGame.handleShuffling threw"
+          )
+        );
+      await pg
+        .handleReveal(pgEvent)
+        .catch((err) =>
+          logger.error(
+            { err, roomId: event.roomId },
+            "[agents] preGame.handleReveal threw"
+          )
+        );
+    });
+  }
 
   async dispatch(event: AgentEvent): Promise<DispatchOutcome> {
     const { redis } = this.deps;
@@ -100,6 +148,10 @@ export class AgentDispatcher {
     // (which would re-trigger on the next listener restart), nor crash the
     // listener (which would stall the entire chain subscription).
     switch (event.type) {
+      case "GAME_STARTED":
+      case "DECK_REVEALED":
+        await this.runPreGame(event);
+        break;
       case "DAY_STARTED":
         if (this.deps.dayHandler) {
           await this.deps.dayHandler

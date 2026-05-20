@@ -18,9 +18,12 @@ import { AgentEventListener } from "./listener.js";
 import { VotingHandler } from "./voting.js";
 import { NightHandler } from "./night.js";
 import { DayHandler, type DayBroadcaster } from "./day.js";
-import { makeVoteChainOps } from "./chain-ops.js";
+import { PreGameHandler } from "./pregame.js";
+import { makeVoteChainOps, makePreGameChainOps } from "./chain-ops.js";
 import { loadOrGenerateMnemonic } from "./wallets.js";
 import { wsManager } from "../ws/wsManager.js";
+import type { GMStore } from "../stores/index.js";
+import { recordAgentNightAction } from "./night-action-bridge.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -63,7 +66,7 @@ function assertDayConfig(chainIds: number[]): void {
   }
 }
 
-export async function startAgentSubsystem(): Promise<void> {
+export async function startAgentSubsystem(store?: GMStore): Promise<void> {
   if (!isEnabled()) {
     logger.info(
       "[agents] AGENTS_ENABLED!=true — agent subsystem disabled (set AGENTS_ENABLED=true to activate)"
@@ -126,6 +129,30 @@ export async function startAgentSubsystem(): Promise<void> {
     chainOpsFor,
     mnemonic,
     language,
+    recordNightAction: store
+      ? (record) => recordAgentNightAction(record, { store, redis })
+      : undefined,
+  });
+
+  // 4j pre-game — its chain surface differs from VoteChainOps, so a separate
+  // cache. Drives all-agent rooms through SHUFFLING+REVEAL to DAY. Always wired
+  // when the subsystem is on: in a human/mixed room our agents aren't the
+  // shuffler so it no-ops harmlessly.
+  const preGameOpsCache = new Map<number, ReturnType<typeof makePreGameChainOps>>();
+  for (const chainId of diamondByChain.keys()) {
+    preGameOpsCache.set(chainId, makePreGameChainOps(chainId));
+  }
+  const preGameHandler = new PreGameHandler({
+    redis,
+    chainOpsFor: (chainId: number) => {
+      const ops = preGameOpsCache.get(chainId);
+      if (!ops) throw new Error(`[agents] no preGameChainOps for chainId ${chainId}`);
+      return ops;
+    },
+    mnemonic,
+    txGasPriceGwei: Number(process.env.TX_GAS_PRICE_GWEI ?? "10"),
+    shareKeysOnChain:
+      (process.env.AGENTS_SHARE_KEYS_ONCHAIN ?? "").toLowerCase() === "true",
   });
 
   // 4d DAY chat — opt-in via AGENTS_DAY_ENABLED. Skipped (no listener wire)
@@ -146,7 +173,7 @@ export async function startAgentSubsystem(): Promise<void> {
       ws: broadcaster,
       mnemonic,
       language: process.env.AGENTS_DAY_LANGUAGE ?? language,
-      llmWaitMs: Number(process.env.LLM_CHAT_WAIT_MS ?? "25000"),
+      llmWaitMs: Number(process.env.LLM_CHAT_WAIT_MS ?? "60000"),
       llmGasPriceGwei: Number(process.env.LLM_CHAT_GAS_PRICE_GWEI ?? "10"),
       txGasPriceGwei: Number(process.env.TX_GAS_PRICE_GWEI ?? "10"),
       sponsorLowThresholdStt: Number(process.env.SPONSOR_LOW_THRESHOLD_STT ?? "1.5"),
@@ -159,6 +186,7 @@ export async function startAgentSubsystem(): Promise<void> {
     votingHandler,
     nightHandler,
     dayHandler,
+    preGameHandler,
   });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);
@@ -169,6 +197,8 @@ export async function startAgentSubsystem(): Promise<void> {
       chainIds: [...diamondByChain.keys()],
       diamonds: [...diamondByChain.entries()].map(([cid, d]) => `${cid}=${d}`),
       handlersWired: [
+        "GAME_STARTED",
+        "DECK_REVEALED",
         "VOTING_STARTED",
         "NIGHT_STARTED",
         ...(dayEnabled ? ["DAY_STARTED"] : []),

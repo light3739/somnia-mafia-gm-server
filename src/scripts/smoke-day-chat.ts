@@ -140,7 +140,7 @@ async function main() {
       publicClient,
       walletClient: agentClient,
       chainId: CHAIN_ID,
-      waitMs: 30_000,
+      waitMs: Number(process.env.LLM_CHAT_WAIT_MS ?? "60000"),
       gasPriceGwei: 10,
     }
   );

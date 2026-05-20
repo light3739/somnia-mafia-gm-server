@@ -5,11 +5,12 @@ import { Router } from 'express';
 import { getRoom, getPlayers, getChainConfig, DIAMOND_ABI, FLAGS, GamePhase } from '../chain.js';
 import { Role } from '../types/contract.js';
 import { eciesEncrypt } from '../ecies.js';
-import { sraDecryptCard, roleFromCardValue, getCardOffset } from '../crypto/sra.js';
+import { resolveRolesFromDeck } from '../agents/role-resolve.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
+import { syncAgentRolesFromResolvedRoles } from '../agents/role-sync.js';
 
 import { logger } from '../utils/logger.js';
 import { wsManager } from '../ws/wsManager.js';
@@ -98,29 +99,26 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
         
         // Final mapping uses all players (even if they didn't shuffle, they get a card index)
         const allAddrsInOrder = (store.roomPlayerOrder.get(roomKey) || players.map(p => p.wallet.toLowerCase())) as string[];
-        
-        allAddrsInOrder.forEach((addr, i) => {
-          if (i < deck.length) {
-            const rawDecoded = sraDecryptCard(deck[i], allKeys);
-            const role = roleFromCardValue(rawDecoded, roomId);
-            if (role === Role.NONE) {
-              logger.warn({
-                index: i,
-                player: addr,
-                decrypted: rawDecoded,
-                source: deck[i],
-                offset: getCardOffset(roomId)
-              }, '[ECIES] Role resolution failed');
-            } else {
-              logger.info({ player: addr, role: Role[role] }, '[ECIES] Role resolved');
-            }
-            roomRoles.set(addr.toLowerCase(), role);
-            if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr.toLowerCase(), role);
+
+        // Shared with the headless agent pre-game (4j) so both paths decode roles
+        // identically — see agents/role-resolve.ts (no HTTP self-call).
+        const resolved = resolveRolesFromDeck(deck, allAddrsInOrder, allKeys, roomId);
+        for (const [addr, role] of resolved) {
+          if (role === Role.NONE) {
+            logger.warn({ player: addr, source: deck[allAddrsInOrder.indexOf(addr)] }, '[ECIES] Role resolution failed');
+          } else {
+            logger.info({ player: addr, role: Role[role] }, '[ECIES] Role resolved');
           }
-        });
+          roomRoles.set(addr, role);
+          if (redis) rPersistRole(redis, Number(chainId), String(roomId), addr, role);
+        }
         // Register mafia members for filtered WS relay (mafia-chat)
         const mafiaAddrs = allAddrsInOrder.filter(addr => roomRoles.get(addr.toLowerCase()) === Role.MAFIA);
         wsManager.setRoomMafia(String(roomId), Number(chainId), mafiaAddrs);
+
+        if (redis) {
+          await syncAgentRolesFromResolvedRoles(redis, Number(chainId), String(roomId), roomRoles);
+        }
 
         // Push role-ready to each player via WS
         for (const addr of allAddrsInOrder) {

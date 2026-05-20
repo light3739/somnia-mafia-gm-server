@@ -308,12 +308,14 @@ describe("NightHandler", () => {
   function buildHandler(opts: {
     chain: NightChainOps;
     inferToolsFn?: (req: any, opts: any) => Promise<InferToolsChatResult>;
+    recordNightAction?: any;
   }) {
     return new NightHandler({
       redis: redis as any,
       chainOpsFor: () => opts.chain,
       mnemonic: TEST_MNEMONIC,
       inferToolsFn: opts.inferToolsFn as any,
+      recordNightAction: opts.recordNightAction,
     });
   }
 
@@ -378,6 +380,48 @@ describe("NightHandler", () => {
     });
     expect(cArgs[4]).toBe(expected);
     expect(trace.traceCommitment).toBe(expected);
+  });
+
+  it("happy path also records the decoded action into the GM night bridge", async () => {
+    const [agentAddr, otherAddr] = deriveAddrs(2);
+    await setAgentRole(redis as any, CHAIN_ID, ROOM_ID.toString(), agentAddr, AgentRole.MAFIA);
+
+    const cd = encodeToolCalldata("mafiaKill(address)", otherAddr);
+    const chain = makeFakeChain({
+      room: { phase: PHASE_NIGHT, dayCount: DAY_COUNT, aliveCount: 2 },
+      players: [activePlayer(agentAddr), activePlayer(otherAddr)],
+      agentSet: new Set([agentAddr.toLowerCase()]),
+      existingCommitment: ZERO32,
+    });
+    const recordNightAction = vi.fn(async () => ({
+      recorded: true,
+      resolvedTriggered: false,
+      memoryWritten: false,
+    }));
+
+    const handler = buildHandler({
+      chain,
+      recordNightAction,
+      inferToolsFn: vi.fn(async () =>
+        makeToolsResult({ pendingToolCalls: [cd], requestId: 88n })
+      ),
+    });
+    const outcomes = await handler.handle(nightEvent());
+
+    expect(outcomes[0].status).toBe("committed");
+    expect(outcomes[0].nightActionRecorded).toBe(true);
+    expect(recordNightAction).toHaveBeenCalledTimes(1);
+    expect(recordNightAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chainId: CHAIN_ID,
+        roomId: ROOM_ID.toString(),
+        dayCount: DAY_COUNT,
+        playerAddress: agentAddr,
+        actionType: "kill",
+        targetAddress: otherAddr,
+        source: "llm",
+      })
+    );
   });
 
   it("citizen role → deterministic SKIP commit (no LLM)", async () => {

@@ -54,6 +54,7 @@ import {
 } from "./llm-call.js";
 import { matchWalletsToAgents, type AgentWallet } from "./wallets.js";
 import { voteActionHash } from "./registry-abi.js";
+import { loadMemoryPromptLines } from "./memory.js";
 
 // FLAGS bits mirror src/types/contract.ts. Inlined to keep this module free of
 // cross-imports that might pull in heavy ABI dependencies under test.
@@ -142,6 +143,12 @@ export interface VotingHandlerDeps {
     roomId: string,
     dayNumber: number
   ) => Promise<{ from: Address; text: string }[]>;
+  /** Private verified facts for this agent (detective results, later audit facts). */
+  memoryFor?: (
+    chainId: number,
+    roomId: string,
+    agent: Address
+  ) => Promise<string[]>;
   /** Agent language override (defaults to "English"). */
   language?: string;
   /** Inject a fake inferString for tests. */
@@ -177,6 +184,7 @@ export class VotingHandler {
   private readonly chatHistoryFor: NonNullable<
     VotingHandlerDeps["chatHistoryFor"]
   >;
+  private readonly memoryFor: NonNullable<VotingHandlerDeps["memoryFor"]>;
 
   constructor(private readonly deps: VotingHandlerDeps) {
     this.maxAgents = deps.maxAgentsPerRoom ?? 6;
@@ -188,6 +196,10 @@ export class VotingHandler {
     this.language = deps.language ?? "English";
     this.chatHistoryFor =
       deps.chatHistoryFor ?? (async () => []);
+    this.memoryFor =
+      deps.memoryFor ??
+      ((chainId, roomId, agent) =>
+        loadMemoryPromptLines(this.deps.redis, chainId, roomId, agent));
   }
 
   async handle(event: VotingStartedEvent): Promise<AgentVoteOutcome[]> {
@@ -377,11 +389,17 @@ export class VotingHandler {
       event.roomId,
       dayCount
     ).catch(() => []);
+    const privateMemory = await this.memoryFor(
+      chain.chainId,
+      event.roomId,
+      wallet.address
+    ).catch(() => []);
 
     const { prompt, system, allowedValues } = buildVotePrompt({
       self: wallet.address,
       alive: allAlive,
       publicChat: chatHistory,
+      privateMemory,
       dayCount,
       language: this.language,
     });

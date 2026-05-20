@@ -144,6 +144,60 @@ export function agentMessageCommittedKey(
   return `${NS}:msg:committed:${chainId}:${roomId}:${phaseId}:${agent.toLowerCase()}`;
 }
 
+/** Minimal factual memory for private agent facts (detective result, later audits). */
+export function agentMemoryKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:memory:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
+/**
+ * 4j pre-game — per-agent SRA (commutative) keypair for the room's deck shuffle.
+ * Value is JSON `{ e, d }` (encryption/decryption exponents as decimal strings).
+ * MUST survive restart: if lost mid-shuffle the committed deck can't be
+ * reproduced for role resolution and the game is unrecoverable (see spec §8).
+ */
+export function agentSraKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:sra:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
+/**
+ * 4j pre-game — per-agent role-commit salt (64 hex chars, no 0x). Persisted so a
+ * retry of commitAndConfirmRole reuses the same salt → same roleHash, and so the
+ * later endgame role reveal can reproduce the commitment.
+ */
+export function agentRoleSaltKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:rolesalt:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
+/**
+ * 4j pre-game — in-flight deck+salt for an agent's shuffle turn. Written BEFORE
+ * commitDeck so a crash between commit and reveal is recoverable: on restart the
+ * agent is DECK_COMMITTED on chain but un-revealed, and revealDeck needs the
+ * exact deck+salt whose keccak matches the stored commit hash. Value is JSON
+ * `{ deck: string[], salt: string }`. Cleared after a successful reveal.
+ */
+export function agentDeckCommitKey(
+  chainId: number,
+  roomId: string,
+  agent: Hex
+): string {
+  return `${NS}:deckcommit:${chainId}:${roomId}:${agent.toLowerCase()}`;
+}
+
+/** 4j pre-game — TTL for SRA keys + role salt + in-flight deck. ~30 days (a game's max lifetime). */
+export const PREGAME_TTL_SECONDS = 30 * 24 * 60 * 60;
+
 /** 4d DAY chat — TTL for chat prompt window / full log / ledger / suspicion / committed flag. */
 export const DAY_CHAT_TTL_SECONDS = 24 * 60 * 60;
 

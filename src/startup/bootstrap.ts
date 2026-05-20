@@ -10,6 +10,7 @@ import { wsManager } from '../ws/wsManager.js';
 import { Role } from '../types/contract.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
+import { syncAgentRolesFromResolvedRoles } from '../agents/role-sync.js';
 
 // 60s — keep in sync with nightRoutes.ts. Must be strictly LESS than on-chain
 // LibGame.NIGHT_TIMEOUT (90s).
@@ -37,6 +38,8 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
       const [chainIdStr, roomIdStr] = roomKey.split(':');
       wsManager.setRoomMafia(roomIdStr, Number(chainIdStr), mafiaAddrs);
     }
+    const [chainIdStr, roomIdStr] = roomKey.split(':');
+    await syncAgentRolesFromResolvedRoles(redisClient, Number(chainIdStr || 50312), roomIdStr, roles);
   }
 
   // Re-arm night timers
@@ -113,6 +116,7 @@ export async function bootstrap(store: GMStore, redisClient: RedisClient): Promi
             rPersistRole(redisClient, cidNum, ridInKey, addr, r);
           }
         });
+        await syncAgentRolesFromResolvedRoles(redisClient, cidNum, ridInKey, roomRoles);
       } catch { /* ... */ }
     })();
   }

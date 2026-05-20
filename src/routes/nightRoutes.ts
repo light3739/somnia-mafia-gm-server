@@ -156,6 +156,13 @@ export function scheduleNightTimeout(rid: bigint, store: GMStore, redis: RedisCl
   nightTimers.set(roomKey, t);
 }
 
+export function ensureNightTimeout(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): void {
+  const roomKey = store.getRoomKey(Number(chainId || 50312), String(rid));
+  if (!nightTimers.has(roomKey)) {
+    scheduleNightTimeout(rid, store, redis, chainId);
+  }
+}
+
 export interface NightRoutesContext {
   store: GMStore;
   redis: RedisClient;

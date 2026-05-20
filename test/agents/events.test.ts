@@ -119,6 +119,42 @@ describe("agents/events.normaliseLog", () => {
     expect(e).toBeNull();
   });
 
+  it("normalises GameStarted → GAME_STARTED (phaseId SHUFFLING)", () => {
+    const e = normaliseLog(
+      {
+        eventName: "GameStarted",
+        args: { roomId: 9n },
+        blockNumber: 50n,
+        transactionHash: TX,
+        logIndex: 0,
+      },
+      { chainId: 50312 }
+    );
+    expect(e).not.toBeNull();
+    expect(e!.type).toBe("GAME_STARTED");
+    expect(e!.roomId).toBe("9");
+    expect((e as any).phaseId).toBe("SHUFFLING");
+  });
+
+  it("normalises DeckRevealed → DECK_REVEALED and drops the heavy deck arg", () => {
+    const e = normaliseLog(
+      {
+        eventName: "DeckRevealed",
+        args: { roomId: 9n, player: "0xabc", deck: ["101", "102", "103"] },
+        blockNumber: 51n,
+        transactionHash: TX,
+        logIndex: 4,
+      },
+      { chainId: 50312 }
+    );
+    expect(e).not.toBeNull();
+    expect(e!.type).toBe("DECK_REVEALED");
+    expect(e!.roomId).toBe("9");
+    expect((e as any).phaseId).toBe("SHUFFLING");
+    expect((e as any).deck).toBeUndefined(); // not carried — handler re-reads getDeck
+    expect(e!.logIndex).toBe(4);
+  });
+
   it("falls back to dayNumber=0 when ctx.dayNumber missing for VOTING", () => {
     const e = normaliseLog(
       {

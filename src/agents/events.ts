@@ -23,6 +23,14 @@ export type AgentEventBase = {
 
 export type AgentEvent =
   | (AgentEventBase & {
+      type: "GAME_STARTED";
+      phaseId: string;
+    })
+  | (AgentEventBase & {
+      type: "DECK_REVEALED";
+      phaseId: string;
+    })
+  | (AgentEventBase & {
       type: "DAY_STARTED";
       phaseId: string;
       dayNumber: number;
@@ -86,6 +94,12 @@ export function normaliseLog(
   };
 
   switch (log.eventName) {
+    // 4j pre-game. Both carry only room coordinates — the heavy `deck` arg on
+    // DeckRevealed is deliberately dropped (PreGameHandler re-reads getDeck).
+    case "GameStarted":
+      return { ...base, type: "GAME_STARTED", phaseId: "SHUFFLING" };
+    case "DeckRevealed":
+      return { ...base, type: "DECK_REVEALED", phaseId: "SHUFFLING" };
     case "DayStarted": {
       const dayNumber = Number(log.args.dayNumber as bigint);
       return {
