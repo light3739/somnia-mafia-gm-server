@@ -69,6 +69,11 @@ const CHAIN_ID = Number(process.env.SMOKE_CHAIN_ID ?? "50312");
 const AGENT_COUNT = Number(process.env.SMOKE_AGENT_COUNT ?? "4"); // ≥4 (startGame min)
 const GAS = Number(process.env.TX_GAS_PRICE_GWEI ?? "10");
 const GAS_RESERVE = parseEther(process.env.SMOKE_GAS_RESERVE_STT ?? "2");
+// SMOKE_DRIVE=false → bootstrap + startGame only, then poll while a separately
+// running gm-server (AGENTS_ENABLED=true) drives the pre-game via its listener.
+// Proves the event-driven path end-to-end on chain.
+const DRIVE = (process.env.SMOKE_DRIVE ?? "true").toLowerCase() !== "false";
+const PHASE_DAY = 3;
 const ZERO: Address = "0x0000000000000000000000000000000000000000";
 const ZERO32: Hex =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -233,24 +238,42 @@ async function main() {
   const startTx = await ops.sendStartGame(host.account, roomId, GAS);
   console.log(`  tx: ${explorer(startTx)}`);
 
-  // 6. Drive the pre-game in process.
-  const handler = new PreGameHandler({
-    redis,
-    chainOpsFor: () => ops,
-    mnemonic,
-    txGasPriceGwei: GAS,
-    maxAgentsPerRoom: AGENT_COUNT,
-    shareKeysOnChain: (process.env.AGENTS_SHARE_KEYS_ONCHAIN ?? "").toLowerCase() === "true",
-  });
+  // 6. Drive the pre-game — in process, OR let the running server's listener.
+  if (DRIVE) {
+    const handler = new PreGameHandler({
+      redis,
+      chainOpsFor: () => ops,
+      mnemonic,
+      txGasPriceGwei: GAS,
+      maxAgentsPerRoom: AGENT_COUNT,
+      shareKeysOnChain: (process.env.AGENTS_SHARE_KEYS_ONCHAIN ?? "").toLowerCase() === "true",
+    });
 
-  console.log("\n→ handleShuffling...");
-  const shuffleOutcomes = await handler.handleShuffling({ chainId: CHAIN_ID, roomId: roomIdStr });
-  for (const o of shuffleOutcomes) console.log(`  ${o.agent} → ${o.status}${o.err ? ` (${o.err})` : ""}`);
+    console.log("\n→ handleShuffling (in-process)...");
+    const shuffleOutcomes = await handler.handleShuffling({ chainId: CHAIN_ID, roomId: roomIdStr });
+    for (const o of shuffleOutcomes) console.log(`  ${o.agent} → ${o.status}${o.err ? ` (${o.err})` : ""}`);
 
-  console.log("→ handleReveal...");
-  const revealOutcomes = await handler.handleReveal({ chainId: CHAIN_ID, roomId: roomIdStr });
-  for (const o of revealOutcomes) {
-    console.log(`  ${o.agent} → ${o.status} role=${o.roleId ? roleLabel(o.roleId as any) : "-"}`);
+    console.log("→ handleReveal (in-process)...");
+    const revealOutcomes = await handler.handleReveal({ chainId: CHAIN_ID, roomId: roomIdStr });
+    for (const o of revealOutcomes) {
+      console.log(`  ${o.agent} → ${o.status} role=${o.roleId ? roleLabel(o.roleId as any) : "-"}`);
+    }
+  } else {
+    console.log("\nSMOKE_DRIVE=false → the running gm-server's listener drives. Polling for DAY...");
+    const deadline = Date.now() + Number(process.env.SMOKE_POLL_MS ?? "240000");
+    while (Date.now() < deadline) {
+      const r: any = await publicClient.readContract({
+        address: diamond,
+        abi: DIAMOND_VOTE_ABI,
+        functionName: "getRoom",
+        args: [roomId],
+      });
+      console.log(
+        `  phase=${r.phase} shufflerIdx=${r.currentShufflerIndex} revealed=${r.revealedCount} confirmed=${r.confirmedCount}/${r.aliveCount}`
+      );
+      if (Number(r.phase) === PHASE_DAY) break;
+      await new Promise((res) => setTimeout(res, 6000));
+    }
   }
 
   // 7. Verify: reached DAY, all confirmed, distribution correct.
@@ -264,7 +287,6 @@ async function main() {
     `\nFinal: phase=${finalRoom.phase} confirmedCount=${finalRoom.confirmedCount}/${finalRoom.aliveCount} dayCount=${finalRoom.dayCount}`
   );
 
-  const PHASE_DAY = 3;
   if (Number(finalRoom.phase) !== PHASE_DAY) {
     throw new Error(`room did NOT reach DAY (phase=${finalRoom.phase}). Pre-game failed.`);
   }
