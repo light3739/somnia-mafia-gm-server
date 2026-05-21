@@ -78,6 +78,8 @@ export interface RoomSnapshot {
   phase: number;
   dayCount: number;
   aliveCount: number;
+  /** Unix seconds; used by the agent phase-timeout driver. Optional for test mocks. */
+  phaseDeadline?: number;
 }
 
 export interface PlayerSnapshot {
@@ -153,6 +155,12 @@ export interface VotingHandlerDeps {
   language?: string;
   /** Inject a fake inferString for tests. */
   inferFn?: InferFn;
+  /**
+   * Per-agent pre-inference funding gate. Returns true if the agent EOA holds
+   * enough to pay an inference deposit (topping up from the sponsor if needed),
+   * false if it could not be funded (sponsor at floor). Unset → no gate.
+   */
+  ensureFunded?: (chainId: number, agent: Address) => Promise<boolean>;
 }
 
 export interface AgentVoteOutcome {
@@ -164,6 +172,7 @@ export interface AgentVoteOutcome {
     | "skipped-action-idempotent"
     | "skipped-already-committed"
     | "skipped-no-targets"
+    | "skipped-unfunded"
     | "vote-failed"
     | "commit-failed";
   voteTxHash?: Hex;
@@ -381,6 +390,28 @@ export class VotingHandler {
         "[agents/voting] trace already committed on chain — skipping"
       );
       return { agent: wallet.address, status: "skipped-already-committed" };
+    }
+
+    // 3b. Per-agent funding gate — top up from the sponsor before paying the
+    // inference deposit so a depleted EOA doesn't revert createRequest (which
+    // dropped the agent to a fallback vote with no LLM reasoning). See
+    // agent-funding.ensureAgentFunded.
+    if (this.deps.ensureFunded) {
+      const funded = await this.deps
+        .ensureFunded(chain.chainId, wallet.address)
+        .catch((err: any) => {
+          log.warn(
+            { err: String(err?.message ?? err) },
+            "[agents/voting] ensureFunded threw — proceeding best-effort"
+          );
+          return true;
+        });
+      if (!funded) {
+        log.warn(
+          "[agents/voting] agent wallet unfunded and sponsor at floor — skipping"
+        );
+        return { agent: wallet.address, status: "skipped-unfunded" };
+      }
     }
 
     // 4. Build the prompt + run inferString.

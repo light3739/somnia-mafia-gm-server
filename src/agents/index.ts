@@ -9,7 +9,7 @@
  * Boot is opt-in via AGENTS_ENABLED=true so production gm-server deployments
  * are unaffected until the subsystem is feature-complete.
  */
-import type { Hex } from "viem";
+import { parseEther, type Address, type Hex } from "viem";
 import { getRedis } from "../redis.js";
 import { getChainConfig } from "../chain.js";
 import { logger } from "../utils/logger.js";
@@ -21,10 +21,14 @@ import { DayHandler, type DayBroadcaster } from "./day.js";
 import { PreGameHandler } from "./pregame.js";
 import { makeVoteChainOps, makePreGameChainOps } from "./chain-ops.js";
 import { loadOrGenerateMnemonic } from "./wallets.js";
+import { ensureAgentFunded, type FundingOps } from "./agent-funding.js";
+import { getSponsorBalance, topUp } from "./sponsor.js";
+import { PhaseTimeoutDriver } from "./phase-timeout.js";
 import { wsManager } from "../ws/wsManager.js";
 import type { GMStore } from "../stores/index.js";
 import { recordAgentNightAction } from "./night-action-bridge.js";
 import { registerOnResolved } from "../services/roleResolution.js";
+import { ServerStore } from "../services/serverStore.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -118,11 +122,59 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     return ops;
   };
 
+  // Per-agent auto-topup: before a phase handler pays an inference deposit it
+  // ensures the agent EOA can afford it, refilling from the sponsor (never below
+  // the sponsor floor). fill-room seeds the initial reserve; this backstops
+  // depletion over a long game so agents never go silent mid-game. See
+  // agents/agent-funding.ts.
+  const txGasPriceGwei = Number(process.env.TX_GAS_PRICE_GWEI ?? "10");
+  const agentMinWei = BigInt(
+    process.env.AGENT_MIN_BALANCE_WEI ?? parseEther("0.5").toString()
+  );
+  const agentTopUpToWei = BigInt(
+    process.env.AGENT_GAS_RESERVE_WEI ?? parseEther("2.5").toString()
+  );
+  const sponsorFloorWei = BigInt(
+    Math.floor(Number(process.env.SPONSOR_LOW_THRESHOLD_STT ?? "1.5") * 1e18)
+  );
+  const makeFundingOps = (chainId: number): FundingOps => {
+    const { public: publicClient } = getChainConfig(chainId);
+    return {
+      getBalanceWei: (addr) => publicClient.getBalance({ address: addr }),
+      getSponsorBalanceWei: () => getSponsorBalance(chainId),
+      topUp: (to, valueWei) =>
+        topUp(chainId, to, valueWei, { gasPriceGwei: txGasPriceGwei }),
+    };
+  };
+  const ensureFunded = async (
+    chainId: number,
+    agent: Address
+  ): Promise<boolean> => {
+    const res = await ensureAgentFunded(makeFundingOps(chainId), agent, {
+      minWei: agentMinWei,
+      topUpToWei: agentTopUpToWei,
+      sponsorFloorWei,
+    });
+    if (res.toppedUp) {
+      logger.info(
+        { chainId, agent, txHash: res.txHash },
+        "[agents] auto-topped-up agent EOA before inference"
+      );
+    } else if (!res.funded) {
+      logger.warn(
+        { chainId, agent, balanceWei: res.balanceWei.toString() },
+        "[agents] agent EOA unfunded and sponsor at floor — inference skipped"
+      );
+    }
+    return res.funded;
+  };
+
   const votingHandler = new VotingHandler({
     redis,
     chainOpsFor,
     mnemonic,
     language,
+    ensureFunded,
   });
 
   const nightHandler = new NightHandler({
@@ -176,6 +228,25 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
       broadcastToRoom(roomId, chainId, ev) {
         const { type, ...data } = ev;
         wsManager.broadcastToRoom(roomId, chainId, { type, data });
+        // The frontend has no 'agent-chat' WS handler and /logs reads the
+        // game-log store — so also persist the message there to make agent chat
+        // visible in the in-game log panel the UI already polls (/logs/:roomId).
+        const short = `${ev.by.slice(0, 6)}…${ev.by.slice(-4)}`;
+        void ServerStore.addGameLog(
+          String(roomId),
+          {
+            id: `agentchat-${ev.messageHash}`,
+            message: `🤖 ${ev.persona} (${short}): ${ev.text}`,
+            type: "info",
+            timestamp: Date.now(),
+          },
+          chainId
+        ).catch((err) =>
+          logger.warn(
+            { err, roomId: String(roomId) },
+            "[agents] addGameLog(agent-chat) failed"
+          )
+        );
       },
     };
     dayHandler = new DayHandler({
@@ -188,8 +259,23 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
       llmGasPriceGwei: Number(process.env.LLM_CHAT_GAS_PRICE_GWEI ?? "10"),
       txGasPriceGwei: Number(process.env.TX_GAS_PRICE_GWEI ?? "10"),
       sponsorLowThresholdStt: Number(process.env.SPONSOR_LOW_THRESHOLD_STT ?? "1.5"),
+      ensureFunded,
     });
   }
+
+  // Agent-driven phase timeout: an alive agent advances DAY/VOTING at the
+  // deadline when no alive human's browser did (last human died / all-agent).
+  // Reuses the funded agent EOAs; defers to humans via a larger buffer.
+  const phaseKickEnabled =
+    (process.env.AGENTS_PHASE_KICK_ENABLED ?? "true").toLowerCase() !== "false";
+  const phaseTimeoutDriver = phaseKickEnabled
+    ? new PhaseTimeoutDriver({
+        chainOpsFor,
+        mnemonic,
+        gasPriceGwei: txGasPriceGwei,
+        bufferSec: Number(process.env.AGENTS_PHASE_KICK_BUFFER_SEC ?? "12"),
+      })
+    : undefined;
 
   const dispatcher = new AgentDispatcher({
     redis,
@@ -198,6 +284,7 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     nightHandler,
     dayHandler,
     preGameHandler,
+    phaseTimeoutDriver,
   });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);

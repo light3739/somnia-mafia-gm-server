@@ -31,6 +31,7 @@ import {
   type WalletClient,
 } from "viem";
 import { logger } from "../utils/logger.js";
+import { withRetry } from "./retry.js";
 
 const REQUESTER_ABI = parseAbi([
   "function createRequest(uint256 agentId, address callbackAddress, bytes4 callbackSelector, bytes payload) payable returns (uint256)",
@@ -45,6 +46,32 @@ const STORE_ABI = parseAbi([
 const INFER_STRING_SELECTOR = toFunctionSelector(
   "inferString(string,string,bool,string[])"
 ) as Hex;
+
+/**
+ * Hard cap on waiting for the createRequest receipt. viem's
+ * waitForTransactionReceipt has NO default timeout, so a stuck/dropped tx would
+ * hang an agent's entire turn forever. On timeout we throw so the caller falls
+ * back (DAY → INFER_TIMEOUT, VOTING → fallback vote). Shared with llm-chat-call.
+ */
+export const RECEIPT_TIMEOUT_MS = 60_000;
+
+export async function waitForReceiptWithTimeout(
+  publicClient: PublicClient,
+  hash: Hex
+) {
+  return Promise.race([
+    publicClient.waitForTransactionReceipt({ hash }),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(`createRequest receipt timeout after ${RECEIPT_TIMEOUT_MS}ms (tx ${hash})`)
+          ),
+        RECEIPT_TIMEOUT_MS
+      )
+    ),
+  ]);
+}
 
 /**
  * Selector of LLMResultStore.handleResponse — the callback that AgentRequester
@@ -159,16 +186,23 @@ export async function inferStringOnSomnia(
   const deposit = reserve + parseEther("0.07") * 3n;
 
   const start = Date.now();
-  const txHash = await walletClient.writeContract({
-    address: cfg.agentRequester,
-    abi: REQUESTER_ABI,
-    functionName: "createRequest",
-    args: [cfg.agentId, cfg.store, HANDLE_RESPONSE_SELECTOR, payload],
-    value: deposit,
-    gasPrice: parseGwei(String(gasPriceGwei)),
-  } as any);
+  // Retry across gas-estimation reverts ONLY (thrown before broadcast → no value
+  // spent → cannot double-spend). Clears the common transient where the Somnia
+  // subcommittee is momentarily unavailable.
+  const txHash = await withRetry(
+    () =>
+      walletClient.writeContract({
+        address: cfg.agentRequester,
+        abi: REQUESTER_ABI,
+        functionName: "createRequest",
+        args: [cfg.agentId, cfg.store, HANDLE_RESPONSE_SELECTOR, payload],
+        value: deposit,
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      } as any),
+    { retries: 1, delayMs: 1500 }
+  );
 
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await waitForReceiptWithTimeout(publicClient, txHash);
   if (receipt.status !== "success") {
     throw new Error(`createRequest reverted (tx ${txHash})`);
   }

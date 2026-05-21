@@ -723,3 +723,57 @@ describe("computeVoteActionHash", () => {
     expect(computeVoteActionHash(a)).not.toBe(computeVoteActionHash(b));
   });
 });
+
+describe("VotingHandler — agent auto-topup gate", () => {
+  it("funds before inference when ensureFunded provided, then votes", async () => {
+    const [agentAddr, otherAddr] = deriveAgentAddresses(2);
+    const chain = makeFakeChain({
+      room: { phase: PHASE_VOTING, dayCount: DAY_COUNT, aliveCount: 2 },
+      players: [activePlayer(agentAddr), activePlayer(otherAddr)],
+      agentSet: new Set([agentAddr.toLowerCase()]),
+      existingCommitment: ZERO32,
+    });
+    const order: string[] = [];
+    const inferFn = vi.fn(async () => {
+      order.push("infer");
+      return { text: `vote ${otherAddr}`, status: 2, requestId: 1n, txHash: LLM_TX_HASH, latencySec: 1 };
+    });
+    const handler = new VotingHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      mnemonic: TEST_MNEMONIC,
+      inferFn: inferFn as any,
+      ensureFunded: async () => {
+        order.push("fund");
+        return true;
+      },
+    });
+    const outcomes = await handler.handle(votingEvent());
+    expect(order).toEqual(["fund", "infer"]); // funded BEFORE inference deposit
+    expect(outcomes[0].status).toBe("voted");
+  });
+
+  it("skips inference + vote with skipped-unfunded when ensureFunded returns false", async () => {
+    const [agentAddr, otherAddr] = deriveAgentAddresses(2);
+    const chain = makeFakeChain({
+      room: { phase: PHASE_VOTING, dayCount: DAY_COUNT, aliveCount: 2 },
+      players: [activePlayer(agentAddr), activePlayer(otherAddr)],
+      agentSet: new Set([agentAddr.toLowerCase()]),
+      existingCommitment: ZERO32,
+    });
+    const inferFn = vi.fn(async () => ({
+      text: "x", status: 2, requestId: 1n, txHash: LLM_TX_HASH, latencySec: 1,
+    }));
+    const handler = new VotingHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      mnemonic: TEST_MNEMONIC,
+      inferFn: inferFn as any,
+      ensureFunded: async () => false,
+    });
+    const outcomes = await handler.handle(votingEvent());
+    expect(outcomes[0].status).toBe("skipped-unfunded");
+    expect(inferFn).not.toHaveBeenCalled();
+    expect(chain.sendVote).not.toHaveBeenCalled();
+  });
+});

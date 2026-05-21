@@ -57,6 +57,17 @@ export interface DayChainOpsExtras {
     agent: Address
   ): Promise<Hex>;
   getSponsorBalanceWei(): Promise<bigint>;
+  /**
+   * Agent calls forcePhaseTimeout(roomId) from its own EOA — agents are
+   * isPlayerInRoom, so this is the same call a human's browser makes at the
+   * deadline. Reverts (TooEarly / phase already advanced) are surfaced so the
+   * caller can treat them as "someone else advanced it" no-ops.
+   */
+  sendForcePhaseTimeout(
+    agent: HDAccount,
+    roomId: bigint,
+    gasPriceGwei: number
+  ): Promise<Hex>;
 }
 
 /** Empirical 120s timeout matches the GM tx helpers in chain.ts. */
@@ -115,6 +126,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
         phase: Number(room.phase),
         dayCount: Number(room.dayCount),
         aliveCount: Number(room.aliveCount),
+        phaseDeadline: Number(room.phaseDeadline),
       };
     },
 
@@ -166,6 +178,27 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
       // instead of recording a phantom voteTxHash in the trace.
       await waitForReceiptOrRevert(publicClient, hash, "vote");
       logger.debug({ hash, agent: agent.address }, "[agents/chain-ops] vote receipt success");
+      return hash;
+    },
+
+    async sendForcePhaseTimeout(agent, roomId, gasPriceGwei) {
+      const wallet = createWalletClient({
+        account: agent,
+        chain: chainObj,
+        transport: http(rpcUrl),
+      });
+      const hash = await wallet.writeContract({
+        address: diamond,
+        abi: DIAMOND_VOTE_ABI,
+        functionName: "forcePhaseTimeout",
+        args: [roomId],
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "forcePhaseTimeout");
+      logger.debug(
+        { hash, agent: agent.address },
+        "[agents/chain-ops] forcePhaseTimeout receipt success"
+      );
       return hash;
     },
 

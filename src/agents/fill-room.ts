@@ -67,7 +67,12 @@ import { agentActionProcessedKey, IDEMPOTENCY_TTL_SECONDS } from "./redis-keys.j
 const ZERO_ADDR: Address = "0x0000000000000000000000000000000000000000";
 const PHASE_LOBBY = 0;
 
-/** Per-agent gas reserve in wei. Override via AGENT_GAS_RESERVE_WEI. Default 0.5 STT. */
+/**
+ * Per-agent gas reserve in wei. Override via AGENT_GAS_RESERVE_WEI. Default 2.5 STT.
+ * MUST exceed one inference deposit (~0.24 STT/call) by a whole game's worth of
+ * calls — at 0.5 STT an agent ran dry after ~2 inferences and createRequest
+ * reverted (no DAY chat / no LLM vote). 2.5 STT ≈ 10 calls; auto-topup backstops.
+ */
 function defaultGasReserve(): bigint {
   const raw = process.env.AGENT_GAS_RESERVE_WEI;
   if (raw) {
@@ -80,7 +85,7 @@ function defaultGasReserve(): bigint {
       );
     }
   }
-  return parseEther("0.5");
+  return parseEther("2.5");
 }
 
 export interface FillRoomRequest {

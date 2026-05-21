@@ -722,3 +722,51 @@ describe("DayHandler — WS payload omits somniaRequestId", () => {
     expect("rawResponseHash" in payload).toBe(false);
   });
 });
+
+describe("DayHandler — agent auto-topup gate", () => {
+  it("calls ensureFunded before inference and proceeds when funded", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const chain = makeChain({ alive: [a0], agentAddrs: [a0] });
+    const order: string[] = [];
+    const h = new DayHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      ws: makeBroadcaster(),
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: (async (...a: any[]) => {
+        order.push("infer");
+        return makeInferFn({ response: "hi all" })(a[0], a[1]);
+      }) as InferChatFn,
+      ensureFunded: async (_chainId: number, _agent: Address) => {
+        order.push("fund");
+        return true;
+      },
+    });
+    const outcomes = await h.handle(makeEvent());
+    expect(order).toEqual(["fund", "infer"]); // funded BEFORE spending on inference
+    expect(outcomes[0].status).toBe("COMMITTED");
+  });
+
+  it("skips inference + commit with AGENT_UNFUNDED when ensureFunded returns false", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const chain = makeChain({ alive: [a0], agentAddrs: [a0] }); // sponsor guard passes (default high)
+    const inferSpy = vi.fn();
+    const redis = new FakeRedis() as any;
+    const h = new DayHandler({
+      redis,
+      chainOpsFor: () => chain,
+      ws: makeBroadcaster(),
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: (async (...a: any[]) => {
+        inferSpy();
+        return makeInferFn({})(a[0], a[1]);
+      }) as InferChatFn,
+      ensureFunded: async () => false,
+    });
+    const ev = makeEvent();
+    const outcomes = await h.handle(ev);
+    expect(outcomes[0].status).toBe("AGENT_UNFUNDED");
+    expect(inferSpy).not.toHaveBeenCalled();
+    expect(chain.sendCommitCalls.length).toBe(0);
+  });
+});

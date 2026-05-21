@@ -29,7 +29,8 @@ import {
   type WalletClient,
 } from "viem";
 import { logger } from "../utils/logger.js";
-import { HANDLE_RESPONSE_SELECTOR } from "./llm-call.js";
+import { HANDLE_RESPONSE_SELECTOR, waitForReceiptWithTimeout } from "./llm-call.js";
+import { withRetry } from "./retry.js";
 
 const REQUESTER_ABI = parseAbi([
   "function createRequest(uint256 agentId, address callbackAddress, bytes4 callbackSelector, bytes payload) payable returns (uint256)",
@@ -143,16 +144,23 @@ export async function inferChatOnSomnia(
   const deposit = reserve + parseEther("0.07") * 3n;
 
   const start = Date.now();
-  const txHash = await walletClient.writeContract({
-    address: cfg.agentRequester,
-    abi: REQUESTER_ABI,
-    functionName: "createRequest",
-    args: [cfg.agentId, cfg.chatStore, HANDLE_RESPONSE_SELECTOR, payload],
-    value: deposit,
-    gasPrice: parseGwei(String(gasPriceGwei)),
-  } as any);
+  // Retry across gas-estimation reverts ONLY (thrown before broadcast → no value
+  // spent → cannot double-spend). Receipt wait is time-capped so a stuck tx can't
+  // hang the agent's DAY turn forever.
+  const txHash = await withRetry(
+    () =>
+      walletClient.writeContract({
+        address: cfg.agentRequester,
+        abi: REQUESTER_ABI,
+        functionName: "createRequest",
+        args: [cfg.agentId, cfg.chatStore, HANDLE_RESPONSE_SELECTOR, payload],
+        value: deposit,
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      } as any),
+    { retries: 1, delayMs: 1500 }
+  );
 
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+  const receipt = await waitForReceiptWithTimeout(publicClient, txHash);
   if (receipt.status !== "success") {
     throw new Error(`createRequest reverted (tx ${txHash})`);
   }

@@ -21,6 +21,7 @@ import type { VotingHandler, VotingStartedEvent } from "./voting.js";
 import type { NightHandler, NightStartedEvent } from "./night.js";
 import type { DayHandler, DayStartedEvent } from "./day.js";
 import type { PreGameHandler } from "./pregame.js";
+import type { PhaseTimeoutDriver } from "./phase-timeout.js";
 import {
   eventProcessedKey,
   lastBlockKey,
@@ -38,6 +39,12 @@ export type DispatcherDeps = {
   dayHandler?: DayHandler;
   /** Optional: when wired, GAME_STARTED / DECK_REVEALED drive the pre-game. */
   preGameHandler?: PreGameHandler;
+  /**
+   * Optional: when wired, an alive agent advances DAY/VOTING at the deadline
+   * (forcePhaseTimeout) if no alive human's browser did — fixes stalls when the
+   * last human dies or in all-agent games.
+   */
+  phaseTimeoutDriver?: PhaseTimeoutDriver;
 };
 
 export type DispatchOutcome =
@@ -163,6 +170,8 @@ export class AgentDispatcher {
               )
             );
         }
+        // Watch the DAY deadline — an alive agent advances DAY→VOTING if no human did.
+        this.deps.phaseTimeoutDriver?.start(event.chainId, BigInt(event.roomId));
         break;
       case "VOTING_STARTED":
         if (this.deps.votingHandler) {
@@ -178,6 +187,9 @@ export class AgentDispatcher {
               )
             );
         }
+        // Watch the VOTING deadline — an alive agent finalizes if turnout is
+        // incomplete and no human did (e.g. the only human died).
+        this.deps.phaseTimeoutDriver?.start(event.chainId, BigInt(event.roomId));
         break;
       case "NIGHT_STARTED":
         if (this.deps.nightHandler) {
@@ -190,8 +202,11 @@ export class AgentDispatcher {
               )
             );
         }
+        // NIGHT is resolved by the GM (doResolveNight), not by a deadline kick.
+        this.deps.phaseTimeoutDriver?.stop(`${event.chainId}:${event.roomId}`);
         break;
       case "GAME_ENDED":
+        this.deps.phaseTimeoutDriver?.stop(`${event.chainId}:${event.roomId}`);
         // TODO 4c: dispatch reveal-bundle for all agent traces in this room
         break;
     }

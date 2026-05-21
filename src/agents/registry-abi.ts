@@ -57,6 +57,7 @@ export const DIAMOND_VOTE_ABI = parseAbi([
   "function getRoom(uint256) view returns ((uint64 id, address host, string name, uint8 phase, uint8 maxPlayers, uint8 playersCount, uint8 aliveCount, uint16 dayCount, uint8 currentShufflerIndex, uint32 lastActionTimestamp, uint32 phaseDeadline, uint8 confirmedCount, uint8 votedCount, uint8 committedCount, uint8 revealedCount, uint8 keysSharedCount, uint128 depositPool, uint128 depositPerPlayer, bool isPrivate, uint256 tournamentId))",
   "function getPlayers(uint256) view returns ((address wallet, string nickname, bytes publicKey, uint32 flags)[])",
   "function vote(uint256 roomId, address target)",
+  "function forcePhaseTimeout(uint256 roomId)",
 ]);
 
 /**

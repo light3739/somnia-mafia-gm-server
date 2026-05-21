@@ -143,6 +143,12 @@ export interface DayHandlerDeps {
   language?: string;
   sponsorLowThresholdStt?: number;
   inferChatFn?: InferChatFn;
+  /**
+   * Per-agent pre-inference funding gate. Returns true if the agent EOA holds
+   * enough to pay an inference deposit (topping up from the sponsor if needed),
+   * false if it could not be funded (sponsor at floor). Unset → no gate.
+   */
+  ensureFunded?: (chainId: number, agent: Address) => Promise<boolean>;
 }
 
 export type DayOutcomeStatus =
@@ -150,7 +156,8 @@ export type DayOutcomeStatus =
   | "skipped-not-active"
   | "skipped-action-idempotent"
   | "skipped-already-committed"
-  | "infer-failed";
+  | "infer-failed"
+  | "AGENT_UNFUNDED";
 
 export interface AgentDayOutcome {
   agent: Address;
@@ -364,6 +371,31 @@ export class DayHandler {
       );
       log.warn({ sponsorWei: sponsorWei.toString() }, "[agents/day] sponsor low — skipping agent");
       return { agent: wallet.address, status: "SPONSOR_LOW" };
+    }
+
+    // 3b. Per-agent wallet funding. fill-room seeds a fixed reserve; over a long
+    // game an agent can deplete below one inference deposit (~0.24 STT) and then
+    // createRequest reverts (agent goes silent). Top up from the sponsor first.
+    if (this.deps.ensureFunded) {
+      const funded = await this.deps
+        .ensureFunded(chain.chainId, wallet.address)
+        .catch((err) => {
+          log.warn(
+            { err: String(err?.message ?? err) },
+            "[agents/day] ensureFunded threw — proceeding best-effort"
+          );
+          return true;
+        });
+      if (!funded) {
+        await this.deps.redis.set(
+          agentSkipReasonKey(chain.chainId, event.roomId, event.phaseId, wallet.address),
+          "agent-unfunded-no-inference",
+          "EX",
+          DAY_CHAT_TTL_SECONDS
+        );
+        log.warn("[agents/day] agent wallet unfunded and sponsor at floor — skipping");
+        return { agent: wallet.address, status: "AGENT_UNFUNDED" };
+      }
     }
 
     // 4. Load context.
