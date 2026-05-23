@@ -179,6 +179,19 @@ export interface DayPromptArgs {
   language: string;
 }
 
+function formatChatLine(raw: string): string {
+  try {
+    const o = JSON.parse(raw);
+    if (o && typeof o.text === "string") {
+      const who = typeof o.by === "string" ? o.by.toLowerCase().slice(0, 7) : "player";
+      return `${who}: ${o.text}`;
+    }
+  } catch {
+    /* not JSON — treat as a plain line */
+  }
+  return raw;
+}
+
 export function buildDayPrompt(args: DayPromptArgs): {
   roles: string[];
   messages: string[];
@@ -198,7 +211,7 @@ export function buildDayPrompt(args: DayPromptArgs): {
     `Alive players: ${args.alive.join(", ")}.`,
     args.recentChat.length === 0
       ? `No previous messages yet.`
-      : `Recent chat:\n${args.recentChat.join("\n")}`,
+      : `Recent chat:\n${args.recentChat.map(formatChatLine).join("\n")}`,
     privateMemory.length === 0
       ? `No private verified memory.`
       : `Private verified memory (use silently; do not quote or reveal role actions):\n${privateMemory.join("\n")}`,
