@@ -10,6 +10,7 @@ import { verifyMessage, type Address } from 'viem';
 import { logger } from '../utils/logger.js';
 import { getSessionKey } from '../chain.js';
 import { getRedis } from '../redis.js';
+import { handleDiscussionChatRelay, type DiscussionChatRelay } from './discussionChatRelay.js';
 
 // ── Event protocol ──────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ export interface ServerEvent {
     | 'roles-revealed'
     | 'mafia-chat'
     | 'agent-chat'
+    | 'discussion-chat'
     | 'game-signal'
     | 'rematch-invite'
     | 'prize-distributed'
@@ -168,6 +170,18 @@ class WsManager {
         m.relayCount = 0;
       }
       if (++m.relayCount > 10) return; // silently drop
+
+      if (msg.event.type === 'discussion-chat') {
+        const out = await handleDiscussionChatRelay(getRedis(), m.roomKey, msg.event as DiscussionChatRelay);
+        if (!out) return;
+        const sockets = this.rooms.get(m.roomKey);
+        if (!sockets) return;
+        const payload = JSON.stringify(out);
+        for (const peer of sockets) {
+          if (peer !== ws && peer.readyState === WebSocket.OPEN) peer.send(payload);
+        }
+        return;
+      }
 
       if (msg.event.type === 'mafia-chat') {
         // Mafia-only relay: send to players whose address is in the mafiaMembers set
