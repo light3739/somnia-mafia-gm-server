@@ -29,6 +29,8 @@ import type { GMStore } from "../stores/index.js";
 import { recordAgentNightAction } from "./night-action-bridge.js";
 import { registerOnResolved } from "../services/roleResolution.js";
 import { ServerStore } from "../services/serverStore.js";
+import { turnController } from "./turnController.js";
+import { getCurrentSpeaker, advanceAndBroadcast } from "../services/discussionTurns.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -261,6 +263,16 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
       sponsorLowThresholdStt: Number(process.env.SPONSOR_LOW_THRESHOLD_STT ?? "1.5"),
       ensureFunded,
     });
+    const dh = dayHandler;
+    turnController.configure({
+      redis,
+      getCurrentSpeaker,
+      advanceAndBroadcast,
+      isAgent: (chainId, roomId, addr) =>
+        chainOpsFor(chainId).isAgent(BigInt(roomId), addr as `0x${string}`),
+      speakOneAgent: (chainId, roomId, dayNumber, agentAddr) =>
+        dh.speakAgentTurn({ chainId, roomId, dayNumber, agentAddr: agentAddr as `0x${string}` }),
+    });
   }
 
   // Agent-driven phase timeout: an alive agent advances DAY/VOTING at the
@@ -282,7 +294,6 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     diamondByChain,
     votingHandler,
     nightHandler,
-    dayHandler,
     preGameHandler,
     phaseTimeoutDriver,
   });
@@ -299,7 +310,9 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
         "DECK_REVEALED",
         "VOTING_STARTED",
         "NIGHT_STARTED",
-        ...(dayEnabled ? ["DAY_STARTED"] : []),
+        // DAY_STARTED always starts the phase-timeout watch; DAY chat is driven
+        // per-turn via discussionRoutes→turnController (only when dayEnabled).
+        "DAY_STARTED",
       ],
     },
     "[agents] subsystem started"

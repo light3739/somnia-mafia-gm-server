@@ -185,6 +185,38 @@ describe("AgentDispatcher", () => {
   });
 });
 
+describe("AgentDispatcher DAY_STARTED routing", () => {
+  let redis: FakeRedis;
+  beforeEach(() => {
+    redis = new FakeRedis();
+  });
+
+  it("DAY_STARTED starts phaseTimeoutDriver (DAY chat is per-turn, not dispatched here)", async () => {
+    // The dispatcher no longer has a dayHandler dep — DAY chat is driven per-turn
+    // by turnController from discussionRoutes, so the only DAY_STARTED side effect
+    // here is starting the phase-timeout watch.
+    const phaseTimeoutDriver = { start: vi.fn(), stop: vi.fn() };
+    const dispatcher = new AgentDispatcher({
+      redis: redis as any,
+      diamondByChain: new Map([[50312, DIAMOND]]),
+      phaseTimeoutDriver: phaseTimeoutDriver as any,
+    });
+    const event: AgentEvent = {
+      type: "DAY_STARTED",
+      chainId: 50312,
+      roomId: "7",
+      phaseId: "D1-DAY",
+      dayNumber: 1,
+      blockNumber: 10,
+      txHash: TX_A,
+      logIndex: 0,
+    };
+    const out = await dispatcher.dispatch(event);
+    expect(out.kind).toBe("dispatched");
+    expect(phaseTimeoutDriver.start).toHaveBeenCalledWith(event.chainId, BigInt(event.roomId));
+  });
+});
+
 describe("AgentDispatcher pre-game routing", () => {
   let redis: FakeRedis;
   beforeEach(() => {

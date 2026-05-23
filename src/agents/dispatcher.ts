@@ -19,7 +19,6 @@ import { logger } from "../utils/logger.js";
 import type { AgentEvent } from "./events.js";
 import type { VotingHandler, VotingStartedEvent } from "./voting.js";
 import type { NightHandler, NightStartedEvent } from "./night.js";
-import type { DayHandler, DayStartedEvent } from "./day.js";
 import type { PreGameHandler } from "./pregame.js";
 import type { PhaseTimeoutDriver } from "./phase-timeout.js";
 import {
@@ -35,8 +34,6 @@ export type DispatcherDeps = {
   votingHandler?: VotingHandler;
   /** Optional: when wired, NIGHT_STARTED is routed here. Skipped otherwise. */
   nightHandler?: NightHandler;
-  /** Optional: when wired, DAY_STARTED is routed here. Skipped otherwise. */
-  dayHandler?: DayHandler;
   /** Optional: when wired, GAME_STARTED / DECK_REVEALED drive the pre-game. */
   preGameHandler?: PreGameHandler;
   /**
@@ -160,17 +157,8 @@ export class AgentDispatcher {
         await this.runPreGame(event);
         break;
       case "DAY_STARTED":
-        if (this.deps.dayHandler) {
-          await this.deps.dayHandler
-            .handle(event as DayStartedEvent)
-            .catch((err) =>
-              logger.error(
-                { err, event: event.type, roomId: event.roomId },
-                "[agents] dayHandler.handle threw"
-              )
-            );
-        }
-        // Watch the DAY deadline — an alive agent advances DAY→VOTING if no human did.
+        // Agents speak per-turn (turnController, driven from discussionRoutes),
+        // not in a burst here — so they read humans who spoke earlier in the day.
         this.deps.phaseTimeoutDriver?.start(event.chainId, BigInt(event.roomId));
         break;
       case "VOTING_STARTED":
