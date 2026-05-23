@@ -5,6 +5,7 @@
 import { Router } from 'express';
 import { getPlayers, getRoom, FLAGS } from '../chain.js';
 import { ServerStore } from '../services/serverStore.js';
+import { shufflePlayers } from '../services/discussionTurns.js';
 import type { GMStore } from '../stores/index.js';
 import type { RateLimitRequestHandler } from 'express-rate-limit';
 import { SignatureBuilder } from '../auth/SignatureBuilder.js';
@@ -22,29 +23,6 @@ export interface DiscussionRoutesContext {
 export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
   const router = Router();
   const { store, verifyAuthorizedSignature, actionLimiter, pollLimiter } = ctx;
-
-  /**
-   * Deterministic shuffle using roomId as seed (must match frontend/GM logic)
-   */
-  function shufflePlayers(players: readonly any[], roomId: string): any[] {
-    const shuffled = [...players];
-    const seed = Number(BigInt(roomId) % 1000000n);
-    let m = shuffled.length, t, i;
-    let s = seed;
-
-    const random = () => {
-      s = (s * 9301 + 49297) % 233280;
-      return s / 233280;
-    };
-
-    while (m) {
-      i = Math.floor(random() * m--);
-      t = shuffled[m];
-      shuffled[m] = shuffled[i];
-      shuffled[i] = t;
-    }
-    return shuffled;
-  }
 
   // ── GET /discussion ───────────────────────────────────────
   router.get('/discussion', pollLimiter, async (req, res) => {
