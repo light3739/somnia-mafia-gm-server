@@ -326,6 +326,64 @@ export class DayHandler {
     return outcomes;
   }
 
+  /**
+   * Make ONE managed agent take its DAY turn: read context (incl. human chat),
+   * infer, commit, broadcast. Idempotent via the same action-key + on-chain
+   * dedup as the burst path. Returns handled:false if the address is not one of
+   * our wallets or the room is not in DAY.
+   *
+   * Note: handled:true means "this was our agent's turn and we attempted it" —
+   * NOT that a message was committed. Inference/commit failures are logged and
+   * persisted as traces inside handleOneAgent; the caller only needs to know the
+   * turn was claimed.
+   */
+  async speakAgentTurn(args: {
+    chainId: number;
+    roomId: string;
+    dayNumber: number;
+    agentAddr: Address;
+  }): Promise<{ handled: boolean }> {
+    const chain = this.deps.chainOpsFor(args.chainId);
+    const roomIdBig = BigInt(args.roomId);
+
+    const room = await chain.getRoom(roomIdBig).catch(() => null);
+    if (!room || room.phase !== PHASE_DAY) return { handled: false };
+
+    const ours = matchWalletsToAgents(
+      this.deps.mnemonic,
+      roomIdBig,
+      [args.agentAddr],
+      this.maxAgents
+    );
+    if (ours.length === 0) return { handled: false };
+    const wallet = ours[0];
+
+    const players = await chain.getPlayers(roomIdBig);
+    const aliveAddrs = players
+      .filter((p) => (p.flags & FLAG_ACTIVE) !== 0)
+      .map((p) => p.wallet);
+
+    const phaseIdHex = makePhaseId("DAY", args.dayNumber);
+    const event: DayStartedEvent = {
+      type: "DAY_STARTED",
+      chainId: chain.chainId,
+      roomId: args.roomId,
+      // Match the canonical chain-event phaseId (events.ts: `D${n}-DAY`) so the
+      // redis action/trace/skip/committed keys line up with the real DayStarted
+      // path and the post-game audit/reveal surface.
+      phaseId: `D${args.dayNumber}-DAY`,
+      dayNumber: args.dayNumber,
+      blockNumber: 0,
+      txHash: ZERO_BYTES32,
+      logIndex: 0,
+    };
+
+    await this.handleOneAgent({ chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs }).catch(
+      () => undefined
+    );
+    return { handled: true };
+  }
+
   private async handleOneAgent(args: {
     chain: DayChainOps;
     wallet: AgentWallet;

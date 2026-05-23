@@ -770,3 +770,71 @@ describe("DayHandler — agent auto-topup gate", () => {
     expect(chain.sendCommitCalls.length).toBe(0);
   });
 });
+
+describe("DayHandler.speakAgentTurn", () => {
+  it("makes a single managed agent commit + broadcast, returns handled:true", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const chain = makeChain({ alive: [a0], agentAddrs: [a0] });
+    const ws = makeBroadcaster();
+    const handler = new DayHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      ws,
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: makeInferFn({ response: "Good morning, town." }),
+    });
+
+    const res = await handler.speakAgentTurn({
+      chainId: 50312,
+      roomId: ROOM_ID.toString(),
+      dayNumber: 1,
+      agentAddr: a0,
+    });
+
+    expect(res.handled).toBe(true);
+    expect(chain.sendCommitCalls).toHaveLength(1);
+    expect(ws.calls).toHaveLength(1);
+    expect(ws.calls[0].event.type).toBe("agent-chat");
+    expect(ws.calls[0].event.text).toBe("Good morning, town.");
+  });
+
+  it("returns handled:false for an address that is not one of our wallets", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const stranger = "0x00000000000000000000000000000000deadbeef" as const;
+    const chain = makeChain({ alive: [a0, stranger], agentAddrs: [a0, stranger] });
+    const ws = makeBroadcaster();
+    const handler = new DayHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      ws,
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: makeInferFn({}),
+    });
+
+    const res = await handler.speakAgentTurn({
+      chainId: 50312, roomId: ROOM_ID.toString(), dayNumber: 1, agentAddr: stranger,
+    });
+
+    expect(res.handled).toBe(false);
+    expect(ws.calls).toHaveLength(0);
+  });
+
+  it("returns handled:false when room is not in DAY phase", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const chain = makeChain({ alive: [a0], agentAddrs: [a0], phaseSequence: [PHASE_NIGHT] });
+    const ws = makeBroadcaster();
+    const handler = new DayHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      ws,
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: makeInferFn({}),
+    });
+
+    const res = await handler.speakAgentTurn({
+      chainId: 50312, roomId: ROOM_ID.toString(), dayNumber: 1, agentAddr: a0,
+    });
+
+    expect(res.handled).toBe(false);
+  });
+});
