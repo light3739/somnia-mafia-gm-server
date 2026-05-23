@@ -12,6 +12,20 @@ import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 
 import { logger } from '../utils/logger.js';
 import { wsManager } from '../ws/wsManager.js';
+import { turnController } from '../agents/turnController.js';
+
+/** Fire-and-forget: tell the agent turn-controller the speaker changed so an
+ *  agent whose turn it now is can speak. No-op until turnController.configure()
+ *  runs at agent-subsystem startup (so agent-disabled deployments do nothing). */
+export function notifySpeakerChanged(
+  roomId: string | number,
+  chainId: number,
+  dayCount: number
+): void {
+  void turnController
+    .onSpeakerChanged(Number(chainId), String(roomId), Number(dayCount))
+    .catch(() => undefined);
+}
 
 export interface DiscussionRoutesContext {
   store: GMStore;
@@ -55,6 +69,7 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
                 type: 'discussion-update',
                 data: { currentSpeakerAddress: nextSpeaker?.wallet || null, currentSpeakerIndex: newState.currentSpeakerIndex, phase: newState.phase, finished: newState.finished },
               });
+              notifySpeakerChanged(String(roomId), Number(chainId || 50312), Number(dayCount || 1));
             }
           }
         } else if (state.phase === 'initial_delay') {
@@ -69,6 +84,7 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
                 type: 'discussion-update',
                 data: { currentSpeakerAddress: nextSpeaker?.wallet || null, currentSpeakerIndex: newState.currentSpeakerIndex, phase: newState.phase, finished: newState.finished },
               });
+              notifySpeakerChanged(String(roomId), Number(chainId || 50312), Number(dayCount || 1));
             }
           }
         }
@@ -158,6 +174,7 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
           type: 'discussion-update',
           data: { currentSpeakerAddress: firstSpeaker?.wallet || null, currentSpeakerIndex: 0, phase: 'initial_delay', finished: false },
         });
+        notifySpeakerChanged(String(roomId), Number(chainId || 50312), Number(dayCount || 1));
 
         return res.json({ ok: true });
       }
@@ -196,6 +213,7 @@ export function createDiscussionRoutes(ctx: DiscussionRoutesContext) {
             type: 'discussion-update',
             data: { currentSpeakerAddress: nextSpeaker?.wallet || null, currentSpeakerIndex: newState.currentSpeakerIndex, phase: newState.phase, finished: newState.finished },
           });
+          notifySpeakerChanged(String(roomId), Number(chainId || 50312), Number(dayCount || 1));
         }
 
         return res.json({ ok: true, newState });
