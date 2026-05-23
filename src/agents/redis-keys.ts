@@ -144,6 +144,17 @@ export function agentMessageCommittedKey(
   return `${NS}:msg:committed:${chainId}:${roomId}:${phaseId}:${agent.toLowerCase()}`;
 }
 
+/** Two-way DAY chat — per-turn lock so many human pollers trigger an agent's
+ *  turn exactly once. SET NX EX ~30s; TTL prevents a crash freezing the turn. */
+export function agentTurnLockKey(
+  chainId: number,
+  roomId: string,
+  dayCount: number,
+  speakerIndex: number
+): string {
+  return `${NS}:turnlock:${chainId}:${roomId}:${dayCount}:${speakerIndex}`;
+}
+
 /** Minimal factual memory for private agent facts (detective result, later audits). */
 export function agentMemoryKey(
   chainId: number,
