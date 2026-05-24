@@ -19,7 +19,7 @@ function cacheNickname(chainId: number, roomId: string, address: string, nicknam
     chainMap.get(roomId)!.set(address.toLowerCase(), nickname);
 }
 
-function resolveNickname(chainId: number, roomId: string, address: string): string {
+export function resolveNickname(chainId: number, roomId: string, address: string): string {
     return nicknameCache.get(chainId)?.get(roomId)?.get(address.toLowerCase())
         ?? `${address.slice(0, 6)}...`;
 }

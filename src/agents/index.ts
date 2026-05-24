@@ -32,6 +32,7 @@ import { ServerStore } from "../services/serverStore.js";
 import { turnController } from "./turnController.js";
 import { getCurrentSpeaker, advanceAndBroadcast } from "../services/discussionTurns.js";
 import { hasUsableChatStore } from "./llm-chat-call.js";
+import { resolveNickname } from "../services/logListener.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -266,6 +267,7 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
       llmGasPriceGwei: Number(process.env.LLM_CHAT_GAS_PRICE_GWEI ?? "10"),
       txGasPriceGwei: Number(process.env.TX_GAS_PRICE_GWEI ?? "10"),
       sponsorLowThresholdStt: Number(process.env.SPONSOR_LOW_THRESHOLD_STT ?? "1.5"),
+      resolveName: resolveNickname,
       ensureFunded,
     });
     const dh = dayHandler;

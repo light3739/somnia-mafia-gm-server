@@ -150,6 +150,8 @@ export interface DayHandlerDeps {
    * false if it could not be funded (sponsor at floor). Unset → no gate.
    */
   ensureFunded?: (chainId: number, agent: Address) => Promise<boolean>;
+  /** Resolve a player's display nickname for (chain, room, address). Unset → agents see short addresses. */
+  resolveName?: (chainId: number, roomId: string, addr: string) => string;
 }
 
 export type DayOutcomeStatus =
@@ -178,13 +180,15 @@ export interface DayPromptArgs {
   privateMemory?: string[];
   dayNumber: number;
   language: string;
+  /** Map an address to a display name for the prompt. Defaults to a short address. */
+  nameOf?: (addr: string) => string;
 }
 
-function formatChatLine(raw: string): string {
+function formatChatLine(raw: string, nameOf: (addr: string) => string): string {
   try {
     const o = JSON.parse(raw);
     if (o && typeof o.text === "string") {
-      const who = typeof o.by === "string" ? o.by.toLowerCase().slice(0, 7) : "player";
+      const who = typeof o.by === "string" ? nameOf(o.by) : "player";
       return `${who}: ${o.text}`;
     }
   } catch {
@@ -201,17 +205,18 @@ export function buildDayPrompt(args: DayPromptArgs): {
     args.role === AgentRole.NONE
       ? `You don't know your role yet — play like someone hunting the mafia: react, suspect, defend. Never claim or invent a specific role.`
       : `Your hidden role is ${roleLabel(args.role)}. Play toward your role's goal, but NEVER reveal your role or any role-specific action you have performed.`;
+  const nameOf = args.nameOf ?? ((a: string) => a.toLowerCase().slice(0, 7));
   const system = [
     `You are ${args.persona}, a player in a game of Mafia. Stay in character.`,
     roleLine,
-    `Write 1-2 sentences in ${args.language}, conversational and SPECIFIC: respond to the latest messages, name who you agree with / suspect / want to vote, and take a clear stance. No vague platitudes (e.g. "trust is thin", "stay alert", "it's quiet here"), no markdown, no role names.`,
+    `Write 1-2 sentences in ${args.language}, conversational and SPECIFIC: respond to the latest messages, name who you agree with / suspect / want to vote, and take a clear stance. Refer to other players by their name. No vague platitudes (e.g. "trust is thin", "stay alert", "it's quiet here"), no markdown, no role names.`,
   ].join(" ");
   const privateMemory = args.privateMemory ?? [];
   const user = [
-    `Day ${args.dayNumber}. Players still alive: ${args.alive.join(", ")}.`,
+    `Day ${args.dayNumber}. Players still alive: ${args.alive.map(nameOf).join(", ")}.`,
     args.recentChat.length === 0
       ? `You are the FIRST to speak — nobody has said anything yet. Open with your own read, suspicion, question, or suggestion. Do NOT invent, quote, or reference anything anyone supposedly said, and do not mention the silence.`
-      : `Conversation so far:\n${args.recentChat.map(formatChatLine).join("\n")}`,
+      : `Conversation so far:\n${args.recentChat.map((l) => formatChatLine(l, nameOf)).join("\n")}`,
     privateMemory.length === 0
       ? ``
       : `Private verified facts (let them shape your take; never quote them or reveal how you know):\n${privateMemory.join("\n")}`,
@@ -518,6 +523,9 @@ export class DayHandler {
       privateMemory,
       dayNumber: event.dayNumber,
       language: this.language,
+      nameOf: (a) =>
+        this.deps.resolveName?.(chain.chainId, event.roomId, a) ??
+        a.toLowerCase().slice(0, 7),
     });
     const walletClient = chain.buildAgentWalletClient(wallet.account);
 

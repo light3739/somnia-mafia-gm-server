@@ -59,4 +59,22 @@ describe("buildDayPrompt concreteness", () => {
     expect(user.toLowerCase()).toContain("do not invent"); // no fabricated quotes
     expect(user).not.toContain("No previous messages yet");
   });
+
+  it("uses nameOf (nicknames) for the alive list and chat lines, not raw addresses", () => {
+    const A = ("0x" + "a".repeat(40)) as `0x${string}`;
+    const B = ("0x" + "b".repeat(40)) as `0x${string}`;
+    const names: Record<string, string> = { [A.toLowerCase()]: "Alice", [B.toLowerCase()]: "Bob" };
+    const { messages } = buildDayPrompt({
+      ...base,
+      role: AgentRole.NONE,
+      alive: [A, B],
+      recentChat: [JSON.stringify({ by: B, text: "I suspect Alice", day: 1 })],
+      nameOf: (a: string) => names[a.toLowerCase()] ?? a.slice(0, 7),
+    });
+    const user = messages[1];
+    expect(user).toContain("Alice"); // alive list shows nickname
+    expect(user).toContain("Bob: I suspect Alice"); // chat line uses nickname
+    expect(user).not.toContain(B); // raw address absent
+    expect(messages[0]).toContain("Refer to other players by their name");
+  });
 });
