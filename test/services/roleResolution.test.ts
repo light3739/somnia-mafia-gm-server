@@ -104,6 +104,29 @@ describe("roleResolution.submitSraKey / maybeResolveRoles", () => {
     expect(onResolved).toHaveBeenCalledWith(CHAIN_ID, ROOM);
   });
 
+  it("does NOT persist/resolve/fire when a wrong key makes every slot decode to NONE", async () => {
+    // Reproduces prod room 31: all players' keys are present (gating passes), but
+    // one key does not match the deck's layers (stale/mismatched human key) → the
+    // un-peeled layer corrupts every card → resolveRolesFromDeck returns Role.NONE
+    // for all. The GM must treat this as resolution FAILED: commit nothing, fire
+    // nothing, leave it retryable — never silently play a role-blind game.
+    const { enc, dByAddr } = dealMixed();
+    const ctx = makeCtx(store, redis, enc);
+    const onResolved = vi.fn();
+    registerOnResolved(onResolved);
+
+    await submitSraKey(ctx, ADDRS[0], dByAddr.get(ADDRS[0].toLowerCase())!);
+    await submitSraKey(ctx, ADDRS[1], dByAddr.get(ADDRS[1].toLowerCase())!);
+    // Wrong key for the last player: player 0's d submitted again → player 2's
+    // encryption layer is never peeled → every slot stays encrypted → all NONE.
+    await submitSraKey(ctx, ADDRS[2], dByAddr.get(ADDRS[0].toLowerCase())!);
+
+    const roomKey = store.getRoomKey(CHAIN_ID, ROOM);
+    expect(store.resolvedRoles.get(roomKey)?.size ?? 0).toBe(0);
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(redis.kv.has(`gm:room:${CHAIN_ID}:${ROOM}:role:${ADDRS[0].toLowerCase()}`)).toBe(false);
+  });
+
   it("re-submitting after resolution is a no-op (onResolved not re-fired)", async () => {
     const { enc, dByAddr } = dealMixed();
     const ctx = makeCtx(store, redis, enc);

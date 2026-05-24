@@ -86,12 +86,34 @@ export async function maybeResolveRoles(ctx: ResolveCtx): Promise<void> {
   const allKeys = addrs.map((a) => roomSra.get(a)!).filter(Boolean) as string[];
   const resolved = resolveRolesFromDeck(deck, order, allKeys, ctx.roomId);
 
+  // Fail-safe: a valid game assigns every player a real role, so ANY NONE means
+  // the key set doesn't match the deck's SRA layers — an incomplete or wrong key
+  // (e.g. a human's stale/mismatched key that never properly reached the GM).
+  // Committing here would silently start a role-blind game: mafia can't identify
+  // itself, voting is blind, DAY chat isn't role-aware (prod room 31). Treat it
+  // as resolution FAILED — persist nothing, fire nothing, leave it retryable so
+  // a corrected re-submit can resolve cleanly.
+  const noneAddrs = [...resolved].filter(([, r]) => r === Role.NONE).map(([a]) => a);
+  if (noneAddrs.length > 0) {
+    logger.error(
+      {
+        roomId: ctx.roomId,
+        chainId: ctx.chainId,
+        noneCount: noneAddrs.length,
+        total: resolved.size,
+        keysPresent: allKeys.length,
+        players: addrs.length,
+        noneAddrs,
+      },
+      "[roleResolution] decode yielded NONE — incomplete/mismatched SRA keys; NOT committing (retryable)"
+    );
+    ctx.store.resolvedRoles.delete(roomKey); // drop the empty claim getRoomMap created
+    return;
+  }
+
   // Populate the map synchronously — no await between re-check and this loop,
   // so no concurrent caller can slip past the size>0 guard above.
   for (const [addr, role] of resolved) {
-    if (role === Role.NONE) {
-      logger.warn({ player: addr, roomId: ctx.roomId }, "[roleResolution] role resolved to NONE");
-    }
     roomRoles.set(addr, role);
   }
   // roomRoles is now fully populated; concurrent callers will see size > 0 and bail.
