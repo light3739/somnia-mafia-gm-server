@@ -12,6 +12,7 @@ import { SignatureBuilder } from '../auth/SignatureBuilder.js';
 import { submitSraKey } from '../services/roleResolution.js';
 
 import { logger } from '../utils/logger.js';
+import { getRedis } from '../redis.js';
 
 export interface EciesRoutesContext {
   store: GMStore;
@@ -23,9 +24,15 @@ export interface EciesRoutesContext {
 
 export function createEciesRoutes(ctx: EciesRoutesContext) {
   const router = Router();
-  const { store, redis, verifyAuthorizedSignature, actionLimiter, pollLimiter } = ctx;
+  const { store, verifyAuthorizedSignature, actionLimiter, pollLimiter } = ctx;
+  // NOTE: ctx.redis is intentionally NOT used. Routes register at boot, BEFORE
+  // connectRedis(), so a captured redis is frozen null — then rPersist*/
+  // syncAgentRoles silently no-op and roles never land in Redis (NIGHT/DAY then
+  // read them as "Unknown"). Each handler resolves redis lazily via getRedis(),
+  // same as agentRoutes.
 
   router.post('/register-pubkey', actionLimiter, async (req, res) => {
+    const redis = getRedis();
     const { roomId, playerAddress, pubkey, signature, signerAddress, nonce, timestamp, chainId } = req.body;
     if (!roomId || !playerAddress || !pubkey || !signature) return res.status(400).json({ error: 'Missing fields' });
 
@@ -58,6 +65,7 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
 
   router.post('/submit-sra-key', actionLimiter, async (req, res) => {
     try {
+      const redis = getRedis();
       const { roomId, playerAddress, sraKey, signature, signerAddress, nonce, timestamp, chainId } = req.body;
       const sigCheck = await verifyAuthorizedSignature({
         roomId: String(roomId), signature: signature as `0x${string}`,
@@ -99,6 +107,7 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
 
   router.get('/my-role/:roomId', pollLimiter, async (req, res) => {
     try {
+      const redis = getRedis();
       const { roomId } = req.params;
       const { playerAddress, signature, signerAddress, nonce, timestamp, chainId } = req.query as Record<string, string>;
       const sigCheck = await verifyAuthorizedSignature({
@@ -171,6 +180,7 @@ export function createEciesRoutes(ctx: EciesRoutesContext) {
   });
 
   router.get('/room-roles/:roomId', pollLimiter, async (req, res) => {
+    const redis = getRedis();
     // Roles are public ONLY after game ends.
     const { chainId } = req.query as Record<string, string>;
     const effectiveCid = Number(chainId) || 50312;
