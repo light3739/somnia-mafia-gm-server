@@ -31,6 +31,7 @@ import { registerOnResolved } from "../services/roleResolution.js";
 import { ServerStore } from "../services/serverStore.js";
 import { turnController } from "./turnController.js";
 import { getCurrentSpeaker, advanceAndBroadcast } from "../services/discussionTurns.js";
+import { hasUsableChatStore } from "./llm-chat-call.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -58,10 +59,14 @@ function resolveChainIds(): number[] {
 function assertDayConfig(chainIds: number[]): void {
   const enabled = (process.env.AGENTS_DAY_ENABLED ?? "").toLowerCase() === "true";
   if (!enabled) return;
+  // Per-chain: warn (do NOT crash) for chains without a usable LLM chat store.
+  // A dual-chain deployment (e.g. testnet+mainnet) where only some chains have a
+  // store must still boot; agents skip DAY chat on the storeless chains.
   for (const cid of chainIds) {
-    if (!process.env[`LLM_CHAT_STORE_${cid}`]) {
-      throw new Error(
-        `[agents] AGENTS_DAY_ENABLED=true but LLM_CHAT_STORE_${cid} is unset`
+    if (!hasUsableChatStore(cid)) {
+      logger.warn(
+        { chainId: cid },
+        `[agents] DAY chat unavailable on chain ${cid} (no LLM chat store configured — set LLM_CHAT_STORE_${cid}); agents will skip DAY chat there`
       );
     }
   }

@@ -838,4 +838,27 @@ describe("DayHandler.speakAgentTurn", () => {
 
     expect(res.handled).toBe(false);
   });
+
+  it("skips a chain with no usable chat store (handled:false, no chain reads)", async () => {
+    const a0 = deriveAgent(ROOM_ID, 0).address;
+    const chain = makeChain({ alive: [a0], agentAddrs: [a0] });
+    const ws = makeBroadcaster();
+    const handler = new DayHandler({
+      redis: new FakeRedis() as any,
+      chainOpsFor: () => chain,
+      ws,
+      mnemonic: TEST_MNEMONIC,
+      inferChatFn: makeInferFn({}),
+    });
+
+    // chainId 5031 (mainnet) has a zero-address default store → not usable.
+    const res = await handler.speakAgentTurn({
+      chainId: 5031, roomId: ROOM_ID.toString(), dayNumber: 1, agentAddr: a0,
+    });
+
+    expect(res.handled).toBe(false);
+    expect(chain.sendCommitCalls).toHaveLength(0);
+    expect(ws.calls).toHaveLength(0);
+    expect(chain.roomCalls).toBe(0); // gate returns before any chain read
+  });
 });

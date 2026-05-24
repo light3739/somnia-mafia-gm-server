@@ -85,6 +85,23 @@ export function getChainChatLlmConfig(chainId: number): ChainChatLlmConfig {
   };
 }
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+/**
+ * Whether DAY chat (inferChat) is usable on a chain — i.e. a non-zero LLM chat
+ * store is configured (via env or a built-in default). Mainnet (5031) has no
+ * deployed store (zero-address default) → returns false, so the day subsystem
+ * can skip DAY chat there instead of crashing a dual-chain deployment.
+ */
+export function hasUsableChatStore(chainId: number): boolean {
+  try {
+    const cfg = getChainChatLlmConfig(chainId);
+    return !!cfg.chatStore && cfg.chatStore.toLowerCase() !== ZERO_ADDRESS;
+  } catch {
+    return false;
+  }
+}
+
 export interface InferChatRequest {
   roles: string[];
   messages: string[];

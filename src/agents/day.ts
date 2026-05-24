@@ -62,6 +62,7 @@ import {
 import { matchWalletsToAgents, type AgentWallet } from "./wallets.js";
 import {
   inferChatOnSomnia as defaultInferChatFn,
+  hasUsableChatStore,
   type InferChatResult,
 } from "./llm-chat-call.js";
 import { loadMemoryPromptLines } from "./memory.js";
@@ -344,6 +345,10 @@ export class DayHandler {
     dayNumber: number;
     agentAddr: Address;
   }): Promise<{ handled: boolean }> {
+    // Per-chain DAY-chat gate: skip chains with no usable LLM chat store
+    // (e.g. mainnet on a dual-chain deployment) instead of crashing/erroring.
+    if (!hasUsableChatStore(args.chainId)) return { handled: false };
+
     const chain = this.deps.chainOpsFor(args.chainId);
     const roomIdBig = BigInt(args.roomId);
 
