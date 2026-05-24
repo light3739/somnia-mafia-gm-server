@@ -52,10 +52,11 @@ describe("buildDayPrompt concreteness", () => {
     expect(messages[0]).toContain("NEVER reveal");
   });
 
-  it("empty chat opens concretely instead of greeting the silence", () => {
+  it("empty chat: first speaker opens concretely and must not invent quotes", () => {
     const { messages } = buildDayPrompt({ ...base, role: AgentRole.NONE, recentChat: [] });
     const user = messages[1];
-    expect(user.toLowerCase()).toContain("do not comment on the silence");
+    expect(user.toLowerCase()).toContain("first to speak");
+    expect(user.toLowerCase()).toContain("do not invent"); // no fabricated quotes
     expect(user).not.toContain("No previous messages yet");
   });
 });

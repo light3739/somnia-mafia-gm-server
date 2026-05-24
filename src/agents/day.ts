@@ -210,7 +210,7 @@ export function buildDayPrompt(args: DayPromptArgs): {
   const user = [
     `Day ${args.dayNumber}. Players still alive: ${args.alive.join(", ")}.`,
     args.recentChat.length === 0
-      ? `Nobody has spoken yet — open with a concrete read, question, or suggestion. Do NOT comment on the silence.`
+      ? `You are the FIRST to speak — nobody has said anything yet. Open with your own read, suspicion, question, or suggestion. Do NOT invent, quote, or reference anything anyone supposedly said, and do not mention the silence.`
       : `Conversation so far:\n${args.recentChat.map(formatChatLine).join("\n")}`,
     privateMemory.length === 0
       ? ``
