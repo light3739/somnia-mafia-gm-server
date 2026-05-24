@@ -198,25 +198,26 @@ export function buildDayPrompt(args: DayPromptArgs): {
 } {
   const roleLine =
     args.role === AgentRole.NONE
-      ? `You do not know your role. Speak only generic social observations — never claim or hint at any specific role.`
-      : `Your hidden role is ${roleLabel(args.role)}. NEVER reveal your role or any role-specific action you have performed.`;
+      ? `You don't know your role yet — play like someone hunting the mafia: react, suspect, defend. Never claim or invent a specific role.`
+      : `Your hidden role is ${roleLabel(args.role)}. Play toward your role's goal, but NEVER reveal your role or any role-specific action you have performed.`;
   const system = [
-    `You are an autonomous AI agent playing Mafia. Persona: ${args.persona}.`,
+    `You are ${args.persona}, a player in a game of Mafia. Stay in character.`,
     roleLine,
-    `Reply in ${args.language} with ONE short line (1-2 sentences). No markdown. No role names.`,
+    `Write 1-2 sentences in ${args.language}, conversational and SPECIFIC: respond to the latest messages, name who you agree with / suspect / want to vote, and take a clear stance. No vague platitudes (e.g. "trust is thin", "stay alert", "it's quiet here"), no markdown, no role names.`,
   ].join(" ");
   const privateMemory = args.privateMemory ?? [];
   const user = [
-    `Day ${args.dayNumber}.`,
-    `Alive players: ${args.alive.join(", ")}.`,
+    `Day ${args.dayNumber}. Players still alive: ${args.alive.join(", ")}.`,
     args.recentChat.length === 0
-      ? `No previous messages yet.`
-      : `Recent chat:\n${args.recentChat.map(formatChatLine).join("\n")}`,
+      ? `Nobody has spoken yet — open with a concrete read, question, or suggestion. Do NOT comment on the silence.`
+      : `Conversation so far:\n${args.recentChat.map(formatChatLine).join("\n")}`,
     privateMemory.length === 0
-      ? `No private verified memory.`
-      : `Private verified memory (use silently; do not quote or reveal role actions):\n${privateMemory.join("\n")}`,
-    `Say one short in-character line.`,
-  ].join("\n");
+      ? ``
+      : `Private verified facts (let them shape your take; never quote them or reveal how you know):\n${privateMemory.join("\n")}`,
+    `Now reply — react to what was just said and push the discussion forward.`,
+  ]
+    .filter(Boolean)
+    .join("\n");
   return { roles: ["system", "user"], messages: [system, user] };
 }
 

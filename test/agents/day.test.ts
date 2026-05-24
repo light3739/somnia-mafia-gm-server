@@ -688,7 +688,8 @@ describe("DayHandler — role miss generic prompt", () => {
     expect(outcomes[0].status).toBe("COMMITTED");
     expect(capturedPrompt).not.toBeNull();
     const system = capturedPrompt!.messages[0];
-    expect(system.toLowerCase()).toContain("do not know your role");
+    expect(system.toLowerCase()).toContain("don't know your role");
+    expect(system.toLowerCase()).toContain("never claim");
     // No role-revealing claim — "Your hidden role is X" must not appear.
     expect(system).not.toMatch(/your hidden role is /i);
     expect(system).not.toMatch(/you are (the )?(detective|doctor|citizen)/i);
