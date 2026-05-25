@@ -213,6 +213,30 @@ function formatChatLine(
   return raw;
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Remove a leading speaker label the LLM sometimes copies from the transcript
+ * format ("You: ..." or "<own nickname>: ...") so it doesn't end up in the
+ * stored/broadcast message. Only strips "You" or the agent's OWN name — never
+ * a reference to another player.
+ */
+export function stripLeadingSpeakerLabel(text: string, selfName?: string): string {
+  let t = text.replace(/^\s+/, "");
+  const labels = ["you"];
+  if (selfName && selfName.trim()) labels.push(selfName.trim().toLowerCase());
+  for (const label of labels) {
+    const re = new RegExp("^" + escapeRegExp(label) + "\\s*:\\s*", "i");
+    if (re.test(t)) {
+      t = t.replace(re, "");
+      break;
+    }
+  }
+  return t;
+}
+
 export function buildDayPrompt(args: DayPromptArgs): {
   roles: string[];
   messages: string[];
@@ -231,13 +255,16 @@ export function buildDayPrompt(args: DayPromptArgs): {
   ].join(" ");
   const privateMemory = args.privateMemory ?? [];
   const user = [
-    `Day ${args.dayNumber}. Players still alive: ${args.alive.map(nameOf).join(", ")}.`,
+    `Day ${args.dayNumber}. Players still alive: ${args.alive
+      .map((a) => (a.toLowerCase() === args.self.toLowerCase() ? `${nameOf(a)} (you)` : nameOf(a)))
+      .join(", ")}.`,
     args.recentChat.length === 0
       ? `You are the FIRST to speak — nobody has said anything yet. Open with your own read, suspicion, question, or suggestion. Do NOT invent, quote, or reference anything anyone supposedly said, and do not mention the silence.`
       : `Conversation so far:\n${args.recentChat.map((l) => formatChatLine(l, nameOf, args.self)).join("\n")}`,
     privateMemory.length === 0
       ? ``
       : `Private verified facts (let them shape your take; never quote them or reveal how you know):\n${privateMemory.join("\n")}`,
+    `Remember: you are ${me}. Never accuse, suspect, agree with, or vote for yourself (${me}) — focus on the OTHER players.`,
     `Now reply — react to what was just said and push the discussion forward.`,
   ]
     .filter(Boolean)
@@ -607,9 +634,14 @@ export class DayHandler {
     }
 
     const rawText = infer.result.response ?? "";
+    // Drop any leading speaker label the LLM copied from the transcript format
+    // ("You:" or its own nickname) before scrubbing — keeps it out of the
+    // broadcast/committed message. rawResponseHash below stays on the true raw.
+    const selfName = nameByAddr.get(wallet.address.toLowerCase());
+    const cleanedText = stripLeadingSpeakerLabel(rawText, selfName);
 
     // 7. Scrub.
-    const scrub: ScrubResult = scrubText(rawText);
+    const scrub: ScrubResult = scrubText(cleanedText);
     const msgKind: MsgKind = scrub.outcome === "ALLOWED" ? "MSG" : "SKIP_SCRUBBED";
     const sanitized = scrub.outcome === "ALLOWED" ? scrub.sanitized : null;
 

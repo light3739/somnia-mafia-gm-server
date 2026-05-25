@@ -1,6 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { buildDayPrompt } from "../../src/agents/day.js";
+import { buildDayPrompt, stripLeadingSpeakerLabel } from "../../src/agents/day.js";
 import { AgentRole } from "../../src/agents/roles.js";
+
+describe("stripLeadingSpeakerLabel", () => {
+  it("strips a leading 'You:' prefix the LLM leaked from the transcript format", () => {
+    expect(stripLeadingSpeakerLabel("You: haiman is too calm", "Agent #2")).toBe("haiman is too calm");
+    expect(stripLeadingSpeakerLabel("you:  hi", "Agent #2")).toBe("hi");
+  });
+
+  it("strips the agent's OWN nickname used as a label", () => {
+    expect(stripLeadingSpeakerLabel("Agent #2: I suspect Bob", "Agent #2")).toBe("I suspect Bob");
+  });
+
+  it("leaves normal text and other-player references untouched", () => {
+    expect(stripLeadingSpeakerLabel("Agent #4 is acting sus", "Agent #2")).toBe("Agent #4 is acting sus");
+    expect(stripLeadingSpeakerLabel("I think haiman is mafia", "Agent #2")).toBe("I think haiman is mafia");
+  });
+});
 
 describe("buildDayPrompt recentChat formatting", () => {
   it("renders JSON chat entries as 'shortaddr: text' lines and includes them", () => {
@@ -96,6 +112,24 @@ describe("buildDayPrompt concreteness", () => {
     expect(user).toContain("You: I think Bob is mafia"); // own line marked "You"
     expect(user).toContain("Bob: no way");
     expect(user).not.toContain("Alice: I think Bob is mafia"); // not third-person self
+  });
+
+  it("marks the agent in the alive list with '(you)' and reminds it in the user message", () => {
+    const A = ("0x" + "a".repeat(40)) as `0x${string}`;
+    const B = ("0x" + "b".repeat(40)) as `0x${string}`;
+    const names: Record<string, string> = { [A.toLowerCase()]: "Alice", [B.toLowerCase()]: "Bob" };
+    const { messages } = buildDayPrompt({
+      ...base,
+      self: A,
+      role: AgentRole.NONE,
+      alive: [A, B],
+      recentChat: [JSON.stringify({ by: B, text: "hi", day: 1 })],
+      nameOf: (a: string) => names[a.toLowerCase()] ?? a.slice(0, 7),
+    });
+    const user = messages[1];
+    expect(user).toContain("Alice (you)"); // self marked in the alive list
+    expect(user).toContain("Bob"); // others plain
+    expect(user.toLowerCase()).toContain("yourself"); // reminder reinforced in the user msg
   });
 
   it("uses nameOf (nicknames) for the alive list and chat lines, not raw addresses", () => {
