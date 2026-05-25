@@ -62,8 +62,8 @@ import { deriveAgentWallets } from "../agents/wallets.js";
 
 const CHAIN_ID = 50312;
 const DIAMOND: Address = "0x031b6746155ce11c7b533935f4674f5fc4682338";
-const ROOM_ID = 8n;
-const DAY_COUNT = 2;
+const ROOM_ID = BigInt(process.env.SMOKE_ROOM_ID ?? "8");
+const DAY_COUNT = Number(process.env.SMOKE_DAY_COUNT ?? "2");
 const MAX_AGENTS_PER_ROOM = 6;
 
 const somniaTestnet = defineChain({

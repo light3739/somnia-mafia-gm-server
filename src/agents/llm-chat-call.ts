@@ -31,6 +31,7 @@ import {
 import { logger } from "../utils/logger.js";
 import { HANDLE_RESPONSE_SELECTOR, waitForReceiptWithTimeout } from "./llm-call.js";
 import { withRetry } from "./retry.js";
+import { waitForLlmResult } from "./wait-for-result.js";
 
 const REQUESTER_ABI = parseAbi([
   "function createRequest(uint256 agentId, address callbackAddress, bytes4 callbackSelector, bytes payload) payable returns (uint256)",
@@ -201,71 +202,50 @@ export async function inferChatOnSomnia(
   }
   if (!requestId) throw new Error(`RequestCreated event missing in tx ${txHash}`);
 
-  const outcomeStatus = await new Promise<number>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { unwatchReady(); } catch {}
-      try { unwatchFailed(); } catch {}
-      logger.warn(
-        { requestId: requestId!.toString(), waitMs },
-        "[agents/llm-chat] ChatResultReady timeout — falling back"
-      );
-      resolve(0);
-    }, waitMs);
-
-    const unwatchReady = publicClient.watchContractEvent({
-      address: cfg.chatStore,
-      abi: CHAT_STORE_ABI,
-      eventName: "ChatResultReady",
-      args: { requestId },
-      onLogs: (logs) => {
-        for (const log of logs) {
-          if (settled) return;
-          const { status } = log.args as { status: number };
-          settled = true;
-          clearTimeout(timer);
-          try { unwatchReady(); } catch {}
-          try { unwatchFailed(); } catch {}
-          resolve(status);
-        }
-      },
-      onError: (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try { unwatchReady(); } catch {}
-        try { unwatchFailed(); } catch {}
-        reject(e);
-      },
-    });
-
-    const unwatchFailed = publicClient.watchContractEvent({
-      address: cfg.chatStore,
-      abi: CHAT_STORE_ABI,
-      eventName: "ChatResultFailed",
-      args: { requestId },
-      onLogs: (logs) => {
-        for (const log of logs) {
-          if (settled) return;
-          const { status } = log.args as { status: number };
-          settled = true;
-          clearTimeout(timer);
-          try { unwatchReady(); } catch {}
-          try { unwatchFailed(); } catch {}
-          resolve(status);
-        }
-      },
-      onError: (e) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try { unwatchReady(); } catch {}
-        try { unwatchFailed(); } catch {}
-        reject(e);
-      },
-    });
+  const reqId = requestId;
+  // Race the ChatResultReady event against a getResult poll — the Somnia RPC
+  // drops the event when the subcommittee callback lands during the
+  // createRequest→receipt gap (this is why agents sometimes silently skip a vote
+  // or a DAY message). See agents/wait-for-result.ts.
+  const outcomeStatus = await waitForLlmResult({
+    waitMs,
+    requestId: reqId,
+    label: "llm-chat",
+    watchEvents: (onStatus, onError) => {
+      const unwatchReady = publicClient.watchContractEvent({
+        address: cfg.chatStore,
+        abi: CHAT_STORE_ABI,
+        eventName: "ChatResultReady",
+        args: { requestId: reqId },
+        onLogs: (logs) => {
+          for (const log of logs) onStatus((log.args as { status: number }).status);
+        },
+        onError,
+      });
+      const unwatchFailed = publicClient.watchContractEvent({
+        address: cfg.chatStore,
+        abi: CHAT_STORE_ABI,
+        eventName: "ChatResultFailed",
+        args: { requestId: reqId },
+        onLogs: (logs) => {
+          for (const log of logs) onStatus((log.args as { status: number }).status);
+        },
+        onError,
+      });
+      return () => {
+        try { unwatchReady(); } catch { /* idempotent */ }
+        try { unwatchFailed(); } catch { /* idempotent */ }
+      };
+    },
+    pollReady: async () => {
+      const r = (await publicClient.readContract({
+        address: cfg.chatStore,
+        abi: CHAT_STORE_ABI,
+        functionName: "getResult",
+        args: [reqId],
+      })) as { ready: boolean; status: number; response: string };
+      return r.ready ? Number(r.status) : null;
+    },
   });
 
   if (outcomeStatus !== 2) {

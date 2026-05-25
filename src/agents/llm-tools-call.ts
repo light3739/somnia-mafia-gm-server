@@ -27,8 +27,8 @@ import {
   type PublicClient,
   type WalletClient,
 } from "viem";
-import { logger } from "../utils/logger.js";
 import { HANDLE_RESPONSE_SELECTOR } from "./llm-call.js";
+import { waitForLlmResult } from "./wait-for-result.js";
 
 const REQUESTER_ABI = parseAbi([
   "function createRequest(uint256 agentId, address callbackAddress, bytes4 callbackSelector, bytes payload) payable returns (uint256)",
@@ -211,60 +211,50 @@ export async function inferToolsChatOnSomnia(
   }
   if (!requestId) throw new Error(`RequestCreated event missing in tx ${txHash}`);
 
-  const outcomeStatus = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      unwatchReady();
-      unwatchFailed();
-      logger.warn(
-        { requestId: requestId!.toString(), waitMs },
-        "[agents/llm-tools] ToolsResultReady timeout — falling back"
-      );
-      resolve(0);
-    }, waitMs);
-
-    const unwatchReady = publicClient.watchContractEvent({
-      address: cfg.toolsStore,
-      abi: TOOLS_STORE_ABI,
-      eventName: "ToolsResultReady",
-      args: { requestId },
-      onLogs: (logs) => {
-        for (const log of logs) {
-          const { status } = log.args as { status: number };
-          clearTimeout(timer);
-          unwatchReady();
-          unwatchFailed();
-          resolve(status);
-        }
-      },
-      onError: (e) => {
-        clearTimeout(timer);
-        unwatchReady();
-        unwatchFailed();
-        reject(e);
-      },
-    });
-
-    const unwatchFailed = publicClient.watchContractEvent({
-      address: cfg.toolsStore,
-      abi: TOOLS_STORE_ABI,
-      eventName: "ToolsResultFailed",
-      args: { requestId },
-      onLogs: (logs) => {
-        for (const log of logs) {
-          const { status } = log.args as { status: number };
-          clearTimeout(timer);
-          unwatchReady();
-          unwatchFailed();
-          resolve(status);
-        }
-      },
-      onError: (e) => {
-        clearTimeout(timer);
-        unwatchReady();
-        unwatchFailed();
-        reject(e);
-      },
-    });
+  const reqId = requestId;
+  // Race the ToolsResultReady event against a getResult poll: the Somnia RPC
+  // frequently drops the event (watch starts AFTER the createRequest receipt, by
+  // which time the fast subcommittee callback has already landed), so the poll is
+  // what actually delivers the night decision. See agents/wait-for-result.ts.
+  const outcomeStatus = await waitForLlmResult({
+    waitMs,
+    requestId: reqId,
+    label: "llm-tools",
+    watchEvents: (onStatus, onError) => {
+      const unwatchReady = publicClient.watchContractEvent({
+        address: cfg.toolsStore,
+        abi: TOOLS_STORE_ABI,
+        eventName: "ToolsResultReady",
+        args: { requestId: reqId },
+        onLogs: (logs) => {
+          for (const log of logs) onStatus((log.args as { status: number }).status);
+        },
+        onError,
+      });
+      const unwatchFailed = publicClient.watchContractEvent({
+        address: cfg.toolsStore,
+        abi: TOOLS_STORE_ABI,
+        eventName: "ToolsResultFailed",
+        args: { requestId: reqId },
+        onLogs: (logs) => {
+          for (const log of logs) onStatus((log.args as { status: number }).status);
+        },
+        onError,
+      });
+      return () => {
+        try { unwatchReady(); } catch { /* idempotent */ }
+        try { unwatchFailed(); } catch { /* idempotent */ }
+      };
+    },
+    pollReady: async () => {
+      const r = (await publicClient.readContract({
+        address: cfg.toolsStore,
+        abi: TOOLS_STORE_ABI,
+        functionName: "getResult",
+        args: [reqId],
+      })) as { ready: boolean; status: number };
+      return r.ready ? Number(r.status) : null;
+    },
   });
 
   if (outcomeStatus !== 2) {

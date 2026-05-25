@@ -38,6 +38,8 @@ function makeFakes(opts: {
   emitAfterMs?: number;
   status?: 2 | 3;
   failedEvent?: boolean;
+  /** When false, getResult reports not-ready so the poll fallback finds nothing. */
+  resultReady?: boolean;
 }) {
   const unsubscribedReady = { v: false };
   const unsubscribedFailed = { v: false };
@@ -47,7 +49,7 @@ function makeFakes(opts: {
       if (functionName === "getRequestDeposit") return Promise.resolve(0n);
       if (functionName === "getResult") {
         return Promise.resolve({
-          ready: true,
+          ready: opts.resultReady ?? true,
           status: opts.status ?? 2,
           response: opts.resultText ?? "",
         });
@@ -109,8 +111,22 @@ describe("inferChatOnSomnia", () => {
     expect(fakes.unsubscribedFailed.v).toEqual(true);
   });
 
+  it("resolves via getResult poll when ChatResultReady never arrives (Somnia drops the log)", async () => {
+    const fakes = makeFakes({ resultText: "polled" }); // no emit → only the poll can deliver
+    const res = await inferChatOnSomnia(baseReq, {
+      publicClient: fakes.publicClient,
+      walletClient: fakes.walletClient,
+      chainId: 50312,
+      waitMs: 2_000,
+      gasPriceGwei: 10,
+    });
+    expect(res.status).toEqual(2);
+    expect(res.result?.response).toEqual("polled");
+    expect(fakes.unsubscribedReady.v).toEqual(true);
+  });
+
   it("timeout returns result=null with status=0; unsubscribes both watchers", async () => {
-    const fakes = makeFakes({});
+    const fakes = makeFakes({ resultReady: false });
     const res = await inferChatOnSomnia(baseReq, {
       publicClient: fakes.publicClient,
       walletClient: fakes.walletClient,
@@ -125,7 +141,7 @@ describe("inferChatOnSomnia", () => {
   });
 
   it("late ChatResultReady arriving after the timeout is ignored", async () => {
-    const fakes = makeFakes({ emitAfterMs: 200, resultText: "late" });
+    const fakes = makeFakes({ emitAfterMs: 200, resultText: "late", resultReady: false });
     const res = await inferChatOnSomnia(baseReq, {
       publicClient: fakes.publicClient,
       walletClient: fakes.walletClient,
