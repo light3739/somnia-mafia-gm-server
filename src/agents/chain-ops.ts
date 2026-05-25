@@ -10,8 +10,6 @@
  * own nonce stream, so we cannot share a single walletClient across them.
  */
 import {
-  createWalletClient,
-  http,
   parseGwei,
   type Address,
   type Chain,
@@ -21,6 +19,7 @@ import {
   type WalletClient,
 } from "viem";
 import { getChainConfig } from "../chain.js";
+import { serializedWalletClient } from "./tx-serializer.js";
 import { logger } from "../utils/logger.js";
 import {
   AGENT_REGISTRY_ABI,
@@ -162,11 +161,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
     },
 
     async sendVote(agent, roomId, target, gasPriceGwei) {
-      const wallet = createWalletClient({
-        account: agent,
-        chain: chainObj,
-        transport: http(rpcUrl),
-      });
+      const wallet = serializedWalletClient(agent, chainObj, rpcUrl);
       const hash = await wallet.writeContract({
         address: diamond,
         abi: DIAMOND_VOTE_ABI,
@@ -182,11 +177,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
     },
 
     async sendForcePhaseTimeout(agent, roomId, gasPriceGwei) {
-      const wallet = createWalletClient({
-        account: agent,
-        chain: chainObj,
-        transport: http(rpcUrl),
-      });
+      const wallet = serializedWalletClient(agent, chainObj, rpcUrl);
       const hash = await wallet.writeContract({
         address: diamond,
         abi: DIAMOND_VOTE_ABI,
@@ -210,11 +201,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
       traceCommitment,
       gasPriceGwei
     ) {
-      const wallet = createWalletClient({
-        account: agent,
-        chain: chainObj,
-        transport: http(rpcUrl),
-      });
+      const wallet = serializedWalletClient(agent, chainObj, rpcUrl);
       const hash = await wallet.writeContract({
         address: diamond,
         abi: AGENT_REGISTRY_ABI,
@@ -228,11 +215,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
     },
 
     buildAgentWalletClient(agent: HDAccount): WalletClient {
-      return createWalletClient({
-        account: agent,
-        chain: chainObj,
-        transport: http(rpcUrl),
-      });
+      return serializedWalletClient(agent, chainObj, rpcUrl);
     },
 
     // ---- 4d DAY chat surface ----
@@ -244,11 +227,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
       messageHash,
       gasPriceGwei
     ) {
-      const wallet = createWalletClient({
-        account: agent,
-        chain: chainObj,
-        transport: http(rpcUrl),
-      });
+      const wallet = serializedWalletClient(agent, chainObj, rpcUrl);
       const hash = await wallet.writeContract({
         address: diamond,
         abi: AGENT_REGISTRY_ABI,
@@ -297,7 +276,7 @@ export function makePreGameChainOps(chainId: number): PreGameChainOps {
   // No return annotation: the inferred concrete client keeps `chain` bound so
   // writeContract doesn't demand it per-call (mirrors makeVoteChainOps).
   const walletFor = (agent: HDAccount) =>
-    createWalletClient({ account: agent, chain: chainObj, transport: http(rpcUrl) });
+    serializedWalletClient(agent, chainObj, rpcUrl);
 
   return {
     chainId,
