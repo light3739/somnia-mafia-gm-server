@@ -30,8 +30,8 @@ import {
   type PublicClient,
   type WalletClient,
 } from "viem";
-import { logger } from "../utils/logger.js";
 import { withRetry } from "./retry.js";
+import { waitForLlmResult } from "./wait-for-result.js";
 
 const REQUESTER_ABI = parseAbi([
   "function createRequest(uint256 agentId, address callbackAddress, bytes4 callbackSelector, bytes payload) payable returns (uint256)",
@@ -41,6 +41,7 @@ const REQUESTER_ABI = parseAbi([
 
 const STORE_ABI = parseAbi([
   "event ResultReady(uint256 indexed requestId, uint8 status, string text)",
+  "function results(uint256 requestId) view returns (bool ready, uint8 status, string text)",
 ]);
 
 const INFER_STRING_SELECTOR = toFunctionSelector(
@@ -226,45 +227,57 @@ export async function inferStringOnSomnia(
   }
   if (!requestId) throw new Error(`RequestCreated event missing in tx ${txHash}`);
 
-  const outcome = await new Promise<{ text: string | null; status: number }>(
-    (resolve, reject) => {
-      const timer = setTimeout(() => {
-        unwatch();
-        logger.warn(
-          { requestId: requestId!.toString(), waitMs },
-          "[agents/llm] ResultReady timeout — falling back"
-        );
-        resolve({ text: null, status: 0 });
-      }, waitMs);
+  const reqId = requestId;
+  // Race the ResultReady event against a results() poll. The Somnia RPC drops the
+  // event when the subcommittee callback lands during the createRequest→receipt
+  // gap (the watch starts only after the receipt) — which silently made agents
+  // SKIP their vote (inferString timed out at waitMs even though results() was
+  // ready in ~1s). See agents/wait-for-result.ts; proven on prod room 35.
+  const outcomeStatus = await waitForLlmResult({
+    waitMs,
+    requestId: reqId,
+    label: "llm",
+    watchEvents: (onStatus, onError) => {
       const unwatch = publicClient.watchContractEvent({
         address: cfg.store,
         abi: STORE_ABI,
         eventName: "ResultReady",
-        args: { requestId },
+        args: { requestId: reqId },
         onLogs: (logs) => {
-          for (const log of logs) {
-            const { status, text } = log.args as {
-              status: number;
-              text: string;
-            };
-            clearTimeout(timer);
-            unwatch();
-            // status enum: 0 = none/unknown, 1 = pending, 2 = success, others = error.
-            resolve({ text: status === 2 ? text : null, status });
-          }
+          for (const log of logs) onStatus((log.args as { status: number }).status);
         },
-        onError: (e) => {
-          clearTimeout(timer);
-          unwatch();
-          reject(e);
-        },
+        onError,
       });
-    }
-  );
+      return () => {
+        try { unwatch(); } catch { /* idempotent */ }
+      };
+    },
+    pollReady: async () => {
+      const r = (await publicClient.readContract({
+        address: cfg.store,
+        abi: STORE_ABI,
+        functionName: "results",
+        args: [reqId],
+      })) as readonly [boolean, number, string];
+      return r[0] ? Number(r[1]) : null;
+    },
+  });
+
+  // status enum: 0 = none/timeout, 1 = pending, 2 = success, others = error.
+  let text: string | null = null;
+  if (outcomeStatus === 2) {
+    const r = (await publicClient.readContract({
+      address: cfg.store,
+      abi: STORE_ABI,
+      functionName: "results",
+      args: [reqId],
+    })) as readonly [boolean, number, string];
+    text = r[2];
+  }
 
   return {
-    text: outcome.text,
-    status: outcome.status,
+    text,
+    status: outcomeStatus,
     requestId,
     txHash,
     latencySec: (Date.now() - start) / 1000,
