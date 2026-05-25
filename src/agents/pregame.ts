@@ -49,7 +49,6 @@ import {
   generateDistributedDeck,
   generateSalt,
   deckCommitHash,
-  roleCommitHash,
   type SraKeys,
 } from "../crypto/sra.js";
 import { resolveRolesFromDeck } from "./role-resolve.js";
@@ -63,6 +62,8 @@ import {
 import { eciesEncrypt } from "../ecies.js";
 import type { GMStore } from "../stores/index.js";
 import { submitSraKey } from "../services/roleResolution.js";
+import { ServerStore } from "../services/serverStore.js";
+import { calculatePoseidon } from "../zk.js";
 
 // ─── Chain surface ───────────────────────────────────────────────────────────
 
@@ -518,12 +519,36 @@ export class PreGameHandler {
     }
     try {
       const salt = await this.loadOrCreateRoleSalt(chain.chainId, roomIdStr, wallet.address);
-      const roleHash = roleCommitHash(role, salt);
+      // ZK role commitment MUST be Poseidon(mafia?1:0, salt) — the SAME scheme
+      // humans use (frontend createRoleCommitHashAsync + POST /submit-role-secret).
+      // The old keccak roleCommitHash fails the endGameZK circuit ("Invalid ZK
+      // State Hash"), so agent games could never finalize.
+      const mappedRole = Number(role) === Role.MAFIA ? 1 : 0;
+      const commitment = await calculatePoseidon([
+        BigInt(mappedRole),
+        BigInt("0x" + salt.replace(/^0x/, "")),
+      ]);
+      const roleHash = toHex(BigInt(commitment), { size: 32 });
       const confirmTxHash = await chain.sendCommitAndConfirmRole(
         wallet.account,
         roomId,
         roleHash,
         this.gas
+      );
+      // Persist the secret so the endgame ZK proof has the agent's real
+      // commitment (humans do this via POST /submit-role-secret).
+      await ServerStore.storeSecret(
+        roomIdStr,
+        wallet.address,
+        Number(role),
+        salt,
+        commitment,
+        chain.chainId
+      ).catch((err: any) =>
+        log.warn(
+          { err: String(err?.message ?? err), agent: wallet.address },
+          "[pregame] storeSecret failed — endgame proof may miss this agent"
+        )
       );
       return {
         agent: wallet.address,

@@ -20,10 +20,12 @@ import {
   keccak256,
   encodeAbiParameters,
   parseAbiParameters,
+  toHex,
   type Address,
   type Hex,
 } from "viem";
 import { createECDH } from "node:crypto";
+import { calculatePoseidon } from "../../src/zk.js";
 
 import {
   PreGameHandler,
@@ -398,12 +400,14 @@ describe("PreGameHandler.handleReveal", () => {
     for (const o of outcomes) {
       const salt = await redis.get(agentRoleSaltKey(CHAIN_ID, ROOM_ID.toString(), o.agent));
       expect(salt).not.toBeNull();
-      const expectedHash = keccak256(
-        encodeAbiParameters(parseAbiParameters("uint256, string"), [
-          BigInt(o.roleId!),
-          salt!,
-        ])
-      );
+      // Poseidon role commitment (mafia?1:0, salt) as bytes32 — matches the ZK
+      // circuit + the human /submit-role-secret path (was keccak, which reverted).
+      const mappedRole = Number(o.roleId) === Role.MAFIA ? 1 : 0;
+      const commitment = await calculatePoseidon([
+        BigInt(mappedRole),
+        BigInt("0x" + salt!.replace(/^0x/, "")),
+      ]);
+      const expectedHash = toHex(BigInt(commitment), { size: 32 });
       const call = chain.confirmRoleCalls.find(
         (c) => c.agent.toLowerCase() === o.agent.toLowerCase()
       );
