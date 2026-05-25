@@ -31,6 +31,7 @@ import { registerOnResolved } from "../services/roleResolution.js";
 import { ServerStore } from "../services/serverStore.js";
 import { revealRoomRoles } from "../services/revealRoles.js";
 import { maybeFinalizeHeadlessWin } from "./headless-endgame.js";
+import { resolveRolesWithFallback } from "./win-detect.js";
 import { setHeadlessFinalizer } from "./headless-endgame-registry.js";
 import { generateEndGameProof } from "../zk.js";
 import { turnController } from "./turnController.js";
@@ -207,8 +208,10 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     redis,
     getRoom: (rid: bigint, chainId: number) => getRoom(rid, chainId),
     getPlayers: (rid: bigint, chainId: number) => getPlayers(rid, chainId),
-    rolesFor: (chainId: number, roomId: string) =>
-      store?.resolvedRoles.get(store.getRoomKey(chainId, roomId)) ?? new Map(),
+    resolveRoles: (cid: number, roomId: string, phase: number) =>
+      store
+        ? resolveRolesWithFallback({ roomId, chainId: cid, store, phase })
+        : Promise.resolve(new Map()),
     isAgent: (rid: bigint, addr: `0x${string}`) =>
       chainOpsFor(cid).isAgent(rid, addr),
     getRoomSecrets: (roomId: string, chainId: number) =>
@@ -249,12 +252,7 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
           return w.account;
         }
       }
-      // Fallback: derive index 0 and log warning — should not happen in practice.
-      logger.warn(
-        { roomId, agentAddr },
-        "[agents] walletFor: address not matched in derivation slots — falling back to idx 0"
-      );
-      return deriveAgentWallet({ mnemonic, roomId: BigInt(roomId), idx: 0 }).account;
+      throw new Error(`[headless-endgame] no agent wallet derived for ${agentAddr} in room ${roomId}`);
     },
   });
 

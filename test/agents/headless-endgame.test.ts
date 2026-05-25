@@ -12,7 +12,7 @@ function baseDeps(over: any = {}) {
     getPlayers: vi.fn().mockResolvedValue([
       { wallet: mafia, flags: FLAG_ACTIVE }, { wallet: townA, flags: FLAG_ACTIVE },
     ]),
-    rolesFor: vi.fn().mockReturnValue(new Map([[mafia.toLowerCase(), Role.MAFIA], [townA.toLowerCase(), Role.CITIZEN]])),
+    resolveRoles: vi.fn().mockResolvedValue(new Map([[mafia.toLowerCase(), Role.MAFIA], [townA.toLowerCase(), Role.CITIZEN]])),
     isAgent: vi.fn().mockResolvedValue(true),
     getRoomSecrets: vi.fn().mockResolvedValue({}),
     generateProof: vi.fn().mockResolvedValue('["0x1","0x2"],[["0x3","0x4"],["0x5","0x6"]],["0x7","0x8"],["0x9","0xa","0xb","0xc","0xd","0xe"]'),
@@ -44,7 +44,7 @@ describe("maybeFinalizeHeadlessWin — gating", () => {
     process.env.AGENTS_ENABLED = "true";
     const deps = baseDeps({
       getPlayers: vi.fn().mockResolvedValue([{ wallet: mafia, flags: FLAG_ACTIVE }, { wallet: townA, flags: FLAG_ACTIVE }, { wallet: "0xT2", flags: FLAG_ACTIVE }]),
-      rolesFor: vi.fn().mockReturnValue(new Map([[mafia.toLowerCase(), Role.MAFIA], [townA.toLowerCase(), Role.CITIZEN], ["0xt2", Role.CITIZEN]])),
+      resolveRoles: vi.fn().mockResolvedValue(new Map([[mafia.toLowerCase(), Role.MAFIA], [townA.toLowerCase(), Role.CITIZEN], ["0xt2", Role.CITIZEN]])),
     });
     expect(await maybeFinalizeHeadlessWin({ chainId: 50312, roomId: "9" }, deps as any)).toBe("no-win");
   });
@@ -52,7 +52,7 @@ describe("maybeFinalizeHeadlessWin — gating", () => {
     process.env.AGENTS_ENABLED = "true";
     const deps = baseDeps({
       getPlayers: vi.fn().mockResolvedValue([{ wallet: mafia, flags: FLAG_ACTIVE }, { wallet: "0xM2", flags: FLAG_ACTIVE }]),
-      rolesFor: vi.fn().mockReturnValue(new Map([[mafia.toLowerCase(), Role.MAFIA], ["0xm2", Role.MAFIA]])),
+      resolveRoles: vi.fn().mockResolvedValue(new Map([[mafia.toLowerCase(), Role.MAFIA], ["0xm2", Role.MAFIA]])),
     });
     expect(await maybeFinalizeHeadlessWin({ chainId: 50312, roomId: "9" }, deps as any)).toBe("no-win");
   });
@@ -90,7 +90,7 @@ describe("maybeFinalizeHeadlessWin — finalize", () => {
     const t2 = "0xT2";
     const deps = baseDeps({
       getPlayers: vi.fn().mockResolvedValue([{ wallet: townA, flags: 0x2 }, { wallet: t2, flags: 0x2 }]),
-      rolesFor: vi.fn().mockReturnValue(new Map([[townA.toLowerCase(), Role.CITIZEN], [t2.toLowerCase(), Role.DOCTOR]])),
+      resolveRoles: vi.fn().mockResolvedValue(new Map([[townA.toLowerCase(), Role.CITIZEN], [t2.toLowerCase(), Role.DOCTOR]])),
       getRoomSecrets: vi.fn().mockResolvedValue({
         [townA.toLowerCase()]: { role: 0, salt: "00", commitment: "2" },
         [t2.toLowerCase()]: { role: 0, salt: "01", commitment: "3" },

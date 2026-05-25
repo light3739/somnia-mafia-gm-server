@@ -59,13 +59,20 @@ export interface DetectWinnerArgs {
   phase: number;
 }
 
+export interface ResolveRolesArgs {
+  roomId: string;
+  chainId: number;
+  store: GMStore;
+  phase: number;
+}
+
 /**
- * Async wrapper: resolves roles (memory → Redis fallback) then calls computeWinner.
+ * Resolves roles for a room: memory lookup first, then Redis fallback.
  * Mirrors the role-restore block in /win-check (~lines 84-113).
- * Returns { winner: null, mafiaCount: 0, townCount: 0 } when roles are unknown.
+ * Returns an empty Map when no roles are found anywhere.
  */
-export async function detectWinner(args: DetectWinnerArgs): Promise<WinnerResult> {
-  const { roomId, chainId, store, players, phase } = args;
+export async function resolveRolesWithFallback(args: ResolveRolesArgs): Promise<Map<string, Role>> {
+  const { roomId, chainId, store, phase } = args;
   const roomKey = store.getRoomKey(chainId, roomId);
 
   let roles = store.resolvedRoles.get(roomKey);
@@ -98,6 +105,19 @@ export async function detectWinner(args: DetectWinnerArgs): Promise<WinnerResult
       logger.error({ err: err.message, roomId }, '[win-detect] Failed to fallback read roles from Redis');
     }
   }
+
+  return roles ?? new Map();
+}
+
+/**
+ * Async wrapper: resolves roles (memory → Redis fallback) then calls computeWinner.
+ * Mirrors the role-restore block in /win-check (~lines 84-113).
+ * Returns { winner: null, mafiaCount: 0, townCount: 0 } when roles are unknown.
+ */
+export async function detectWinner(args: DetectWinnerArgs): Promise<WinnerResult> {
+  const { roomId, chainId, store, players, phase } = args;
+
+  const roles = await resolveRolesWithFallback({ roomId, chainId, store, phase });
 
   if (!roles || roles.size === 0) {
     return { winner: null, mafiaCount: 0, townCount: 0 };

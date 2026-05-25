@@ -10,7 +10,7 @@ export interface HeadlessEndgameDeps {
   redis: { set: Function; del: Function };
   getRoom(roomId: bigint, chainId: number): Promise<{ phase: number }>;
   getPlayers(roomId: bigint, chainId: number): Promise<readonly { wallet: string; flags: number | bigint }[]>;
-  rolesFor(chainId: number, roomId: string): Map<string, Role>;
+  resolveRoles(chainId: number, roomId: string, phase: number): Promise<Map<string, Role>>;
   isAgent(roomId: bigint, addr: Address): Promise<boolean>;
   getRoomSecrets(roomId: string, chainId: number): Promise<Record<string, { role: number; salt: string; commitment: string }> | null>;
   generateProof(roomId: string, zkInput: any[]): Promise<string>;
@@ -37,7 +37,7 @@ export async function maybeFinalizeHeadlessWin(
   const flags = await Promise.all(alive.map((p) => deps.isAgent(rid, p.wallet as Address)));
   if (!flags.every(Boolean)) return "has-human";
 
-  const roles = deps.rolesFor(chainId, roomId);
+  const roles = await deps.resolveRoles(chainId, roomId, room.phase);
   const { winner, townCount } = computeWinner(alive as unknown as Parameters<typeof computeWinner>[0], roles);
   if (!winner || townCount === 0) return "no-win"; // townCount===0 → endGameZK reverts "No town players"
 
