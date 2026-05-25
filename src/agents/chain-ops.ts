@@ -67,6 +67,18 @@ export interface DayChainOpsExtras {
     roomId: bigint,
     gasPriceGwei: number
   ): Promise<Hex>;
+  /**
+   * Agent calls startVoting(roomId) from its own EOA to advance DAY→VOTING
+   * EARLY (the contract only requires an active participant + DAY phase, NOT the
+   * deadline — same call a player's browser makes when discussion finishes). Used
+   * by the headless-day driver so an all-agent day doesn't sit silent until the
+   * deadline. Reverts (WrongPhase = already advanced) are surfaced as no-ops.
+   */
+  sendStartVoting(
+    agent: HDAccount,
+    roomId: bigint,
+    gasPriceGwei: number
+  ): Promise<Hex>;
 }
 
 /** Empirical 120s timeout matches the GM tx helpers in chain.ts. */
@@ -83,6 +95,7 @@ const TX_RECEIPT_TIMEOUT_MS = 120_000;
  */
 const GAS = {
   vote: 8_000_000n,
+  startVoting: 8_000_000n,
   forcePhaseTimeout: 8_000_000n,
   startGame: 8_000_000n,
   commitAndConfirmRole: 3_000_000n,
@@ -213,6 +226,24 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
       logger.debug(
         { hash, agent: agent.address },
         "[agents/chain-ops] forcePhaseTimeout receipt success"
+      );
+      return hash;
+    },
+
+    async sendStartVoting(agent, roomId, gasPriceGwei) {
+      const wallet = serializedWalletClient(agent, chainObj, rpcUrl);
+      const hash = await wallet.writeContract({
+        address: diamond,
+        abi: DIAMOND_VOTE_ABI,
+        functionName: "startVoting",
+        args: [roomId],
+        gas: GAS.startVoting, // loops all players to clear vote flags — must not OOG
+        gasPrice: parseGwei(String(gasPriceGwei)),
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "startVoting");
+      logger.debug(
+        { hash, agent: agent.address },
+        "[agents/chain-ops] startVoting receipt success"
       );
       return hash;
     },

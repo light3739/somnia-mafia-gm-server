@@ -21,6 +21,7 @@ import type { VotingHandler, VotingStartedEvent } from "./voting.js";
 import type { NightHandler, NightStartedEvent } from "./night.js";
 import type { PreGameHandler } from "./pregame.js";
 import type { PhaseTimeoutDriver } from "./phase-timeout.js";
+import type { HeadlessDayDriver } from "./headless-day.js";
 import {
   eventProcessedKey,
   lastBlockKey,
@@ -42,6 +43,12 @@ export type DispatcherDeps = {
    * last human dies or in all-agent games.
    */
   phaseTimeoutDriver?: PhaseTimeoutDriver;
+  /**
+   * Optional: when wired, on DAY_STARTED with no alive human the GM starts +
+   * drives the agent discussion itself (and starts voting early) so a headless
+   * day isn't a silent "Waiting for discussion..." screen. No-op for mixed games.
+   */
+  headlessDayDriver?: HeadlessDayDriver;
 };
 
 export type DispatchOutcome =
@@ -160,6 +167,19 @@ export class AgentDispatcher {
         // Agents speak per-turn (turnController, driven from discussionRoutes),
         // not in a burst here — so they read humans who spoke earlier in the day.
         this.deps.phaseTimeoutDriver?.start(event.chainId, BigInt(event.roomId));
+        // Headless games have no browser to start/advance the discussion → an
+        // agent does it. Fire-and-forget: it drives the whole day's chat (~tens
+        // of seconds) and must not block event dispatch. No-op if a human is alive.
+        if (this.deps.headlessDayDriver) {
+          void this.deps.headlessDayDriver
+            .onDayStarted({ chainId: event.chainId, roomId: event.roomId })
+            .catch((err) =>
+              logger.error(
+                { err, roomId: event.roomId },
+                "[agents] headlessDayDriver.onDayStarted threw"
+              )
+            );
+        }
         break;
       case "VOTING_STARTED":
         if (this.deps.votingHandler) {

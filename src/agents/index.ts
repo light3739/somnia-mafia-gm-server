@@ -30,9 +30,15 @@ import { recordAgentNightAction } from "./night-action-bridge.js";
 import { registerOnResolved } from "../services/roleResolution.js";
 import { ServerStore } from "../services/serverStore.js";
 import { turnController } from "./turnController.js";
-import { getCurrentSpeaker, advanceAndBroadcast } from "../services/discussionTurns.js";
+import {
+  getCurrentSpeaker,
+  advanceAndBroadcast,
+  getAliveShuffled,
+} from "../services/discussionTurns.js";
 import { hasUsableChatStore } from "./llm-chat-call.js";
 import { resolveNickname } from "../services/logListener.js";
+import { HeadlessDayDriver } from "./headless-day.js";
+import { agentHeadlessDayKey } from "./redis-keys.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -296,6 +302,60 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
       })
     : undefined;
 
+  // Headless DAY discussion: when no alive human is left to start/advance the
+  // rotation from a browser, an agent does it (start discussion → drive turns →
+  // start voting early). Only when DAY chat is on (else turnController is
+  // unconfigured and driving turns is a no-op). Mixed games are untouched.
+  const headlessDayDriver = dayEnabled
+    ? new HeadlessDayDriver({
+        chainOpsFor,
+        mnemonic,
+        gasPriceGwei: txGasPriceGwei,
+        dayEnabled: true,
+        // Server-side equivalent of a player's browser POSTing /discussion `start`.
+        async startDiscussion(chainId, roomId, dayCount) {
+          const existing = await ServerStore.getDiscussionState(roomId, dayCount, chainId);
+          // Idempotent: don't clobber a discussion already active/finished.
+          if (existing && (existing.finished || existing.phase === "speaking")) return;
+          const alive = await getAliveShuffled(chainId, roomId);
+          await ServerStore.setDiscussionState(
+            roomId,
+            dayCount,
+            {
+              currentSpeakerIndex: 0,
+              speakerStartTime: Date.now(),
+              speakerDuration: 60,
+              finished: false,
+              phase: "speaking",
+            },
+            chainId
+          );
+          const first = alive[0];
+          wsManager.broadcastToRoom(roomId, chainId, {
+            type: "discussion-update",
+            data: {
+              currentSpeakerAddress: first?.wallet || null,
+              currentSpeakerIndex: 0,
+              phase: "speaking",
+              finished: false,
+            },
+          });
+        },
+        driveTurns: (chainId, roomId, dayCount) =>
+          turnController.onSpeakerChanged(chainId, roomId, dayCount),
+        // Once-per-day claim (15min TTL > any single DAY) so re-delivered
+        // DAY_STARTED events don't double-drive.
+        claimOnce: async (chainId, roomId, dayCount) =>
+          (await redis.set(
+            agentHeadlessDayKey(chainId, roomId, dayCount),
+            "1",
+            "EX",
+            15 * 60,
+            "NX"
+          )) === "OK",
+      })
+    : undefined;
+
   const dispatcher = new AgentDispatcher({
     redis,
     diamondByChain,
@@ -303,6 +363,7 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     nightHandler,
     preGameHandler,
     phaseTimeoutDriver,
+    headlessDayDriver,
   });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);

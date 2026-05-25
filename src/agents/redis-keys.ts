@@ -155,6 +155,16 @@ export function agentTurnLockKey(
   return `${NS}:turnlock:${chainId}:${roomId}:${dayCount}:${speakerIndex}`;
 }
 
+/** Once-per-(chain,room,day) claim so the headless-day driver runs a given DAY
+ *  exactly once even if DAY_STARTED is re-delivered. */
+export function agentHeadlessDayKey(
+  chainId: number,
+  roomId: string,
+  dayCount: number
+): string {
+  return `${NS}:headlessday:${chainId}:${roomId}:${dayCount}`;
+}
+
 /** Minimal factual memory for private agent facts (detective result, later audits). */
 export function agentMemoryKey(
   chainId: number,
