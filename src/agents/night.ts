@@ -140,6 +140,9 @@ export interface NightHandlerDeps {
   llmWaitMs?: number;
   llmGasPriceGwei?: number;
   txGasPriceGwei?: number;
+  /** Background commit retry budget (tests inject tiny delays). */
+  nightCommitMaxAttempts?: number;
+  nightCommitRetryDelayMs?: number;
   language?: string;
   /** Inject a fake inferToolsChat for tests. */
   inferToolsFn?: InferToolsFn;
@@ -151,6 +154,8 @@ export interface NightHandlerDeps {
 
 export type NightOutcomeStatus =
   | "committed"
+  | "recorded"
+  | "record-failed"
   | "skipped-not-active"
   | "skipped-action-idempotent"
   | "skipped-already-committed"
@@ -401,14 +406,20 @@ export class NightHandler {
   private readonly llmWaitMs: number;
   private readonly llmGasPriceGwei: number;
   private readonly txGasPriceGwei: number;
+  private readonly nightCommitMaxAttempts: number;
+  private readonly nightCommitRetryDelayMs: number;
   private readonly inferToolsFn: InferToolsFn;
   private readonly language: string;
+  /** In-flight background commits, tracked for tests + graceful shutdown. */
+  private readonly pendingCommits = new Set<Promise<void>>();
 
   constructor(private readonly deps: NightHandlerDeps) {
     this.maxAgents = deps.maxAgentsPerRoom ?? 6;
     this.llmWaitMs = deps.llmWaitMs ?? 60_000;
     this.llmGasPriceGwei = deps.llmGasPriceGwei ?? 10;
     this.txGasPriceGwei = deps.txGasPriceGwei ?? 10;
+    this.nightCommitMaxAttempts = deps.nightCommitMaxAttempts ?? 3;
+    this.nightCommitRetryDelayMs = deps.nightCommitRetryDelayMs ?? 4_000;
     this.inferToolsFn = deps.inferToolsFn ?? defaultInferToolsFn;
     this.language = deps.language ?? "English";
   }
@@ -428,6 +439,99 @@ export class NightHandler {
       );
       return false;
     }
+  }
+
+  /**
+   * Fire commitAgentInference in the BACKGROUND with bounded retry. The night
+   * action is already bridged into GM state + persisted, so a slow/stuck commit
+   * (prod room 34 D1: receipt timeout from vote/night tx contention) can no
+   * longer drop the kill. On success the persisted trace is patched with the
+   * real commitTxHash; on exhaustion commitTxHash stays null for a later
+   * replay/sweep. Never throws. Tracked so tests / shutdown can drain via
+   * waitForBackgroundCommits().
+   */
+  private fireCommitInBackground(args: {
+    chain: NightChainOps;
+    wallet: AgentWallet;
+    roomIdBig: bigint;
+    event: NightStartedEvent;
+    phaseIdHex: Hex;
+    actionHash: Hex;
+    traceCommitment: Hex;
+    log: typeof logger;
+  }): void {
+    const p = this.commitTraceWithRetry(args).finally(() => {
+      this.pendingCommits.delete(p);
+    });
+    this.pendingCommits.add(p);
+  }
+
+  private async commitTraceWithRetry(args: {
+    chain: NightChainOps;
+    wallet: AgentWallet;
+    roomIdBig: bigint;
+    event: NightStartedEvent;
+    phaseIdHex: Hex;
+    actionHash: Hex;
+    traceCommitment: Hex;
+    log: typeof logger;
+  }): Promise<void> {
+    const { chain, wallet, roomIdBig, event, phaseIdHex, actionHash, traceCommitment, log } = args;
+    for (let attempt = 1; attempt <= this.nightCommitMaxAttempts; attempt++) {
+      try {
+        const commitTxHash = await chain.sendCommitInference(
+          wallet.account,
+          roomIdBig,
+          phaseIdHex,
+          actionHash,
+          traceCommitment,
+          this.txGasPriceGwei
+        );
+        log.info({ commitTxHash, attempt }, "[agents/night] commit tx confirmed (background)");
+        await this.patchTraceCommit(chain.chainId, event, wallet.address, commitTxHash, log);
+        return;
+      } catch (err: any) {
+        const last = attempt >= this.nightCommitMaxAttempts;
+        log[last ? "error" : "warn"](
+          { err: String(err?.message ?? err), attempt },
+          last
+            ? "[agents/night] commit gave up after retries — action stands, on-chain trace incomplete"
+            : "[agents/night] commit attempt failed — retrying in background"
+        );
+        if (!last) {
+          await new Promise((r) => setTimeout(r, this.nightCommitRetryDelayMs * attempt));
+        }
+      }
+    }
+  }
+
+  /** Patch the persisted trace with the real commitTxHash once it lands. */
+  private async patchTraceCommit(
+    chainId: number,
+    event: NightStartedEvent,
+    addr: Address,
+    commitTxHash: Hex,
+    log: typeof logger
+  ): Promise<void> {
+    try {
+      const key = agentTraceKey(chainId, event.roomId, event.phaseId, addr);
+      const raw = await this.deps.redis.get(key);
+      if (!raw) return;
+      const trace = JSON.parse(raw);
+      trace.commitTxHash = commitTxHash;
+      trace.committedAt = Date.now();
+      await this.deps.redis.set(key, JSON.stringify(trace), "EX", IDEMPOTENCY_TTL_SECONDS);
+    } catch (err: any) {
+      log.warn(
+        { err: String(err?.message ?? err) },
+        "[agents/night] could not patch trace with commitTxHash"
+      );
+    }
+  }
+
+  /** Await all in-flight background commits (tests + graceful shutdown). */
+  async waitForBackgroundCommits(): Promise<void> {
+    await Promise.allSettled([...this.pendingCommits]);
   }
 
   private async replayNightActionFromTrace(args: {
@@ -732,32 +836,9 @@ export class NightHandler {
       actionHash,
     });
 
-    let commitTxHash: Hex | undefined;
-    try {
-      commitTxHash = await chain.sendCommitInference(
-        wallet.account,
-        roomIdBig,
-        phaseIdHex,
-        actionHash,
-        traceCommitment,
-        this.txGasPriceGwei
-      );
-      log.info({ commitTxHash, role: roleLabel(role) }, "[agents/night] SKIP committed");
-    } catch (err: any) {
-      log.error(
-        { err: String(err?.message ?? err) },
-        "[agents/night] SKIP commit tx failed"
-      );
-      return {
-        agent: wallet.address,
-        status: "commit-failed",
-        role,
-        action: "SKIP",
-        target: ZERO_ADDR,
-        err: String(err?.message ?? err),
-      };
-    }
-
+    // Persist trace first, then record the skip into GM state, then commit on
+    // chain in the background — same ordering as the active-role path so a slow
+    // commit never blocks or drops the night turn.
     await this.deps.redis.set(
       agentTraceKey(
         chain.chainId,
@@ -776,7 +857,7 @@ export class NightHandler {
         action: "SKIP",
         target: ZERO_ADDR,
         source: "skip",
-        commitTxHash,
+        commitTxHash: null,
         committedAt: Date.now(),
       }),
       "EX",
@@ -792,19 +873,29 @@ export class NightHandler {
         actionType: "skip",
         targetAddress: ZERO_ADDR,
         source: "skip",
-        commitTxHash,
+        commitTxHash: null,
       },
       log
     );
 
+    this.fireCommitInBackground({
+      chain,
+      wallet,
+      roomIdBig,
+      event,
+      phaseIdHex,
+      actionHash,
+      traceCommitment,
+      log,
+    });
+
     return {
       agent: wallet.address,
-      status: "committed",
+      status: nightActionRecorded ? "recorded" : "record-failed",
       role,
       action: "SKIP",
       target: ZERO_ADDR,
       decisionSource: "skip",
-      commitTxHash,
       nightActionRecorded,
     };
   }
@@ -936,24 +1027,8 @@ export class NightHandler {
       actionHash,
     });
 
-    let commitTxHash: Hex | undefined;
-    try {
-      commitTxHash = await chain.sendCommitInference(
-        wallet.account,
-        roomIdBig,
-        phaseIdHex,
-        actionHash,
-        traceCommitment,
-        this.txGasPriceGwei
-      );
-      log.info({ commitTxHash }, "[agents/night] commit tx sent");
-    } catch (err: any) {
-      log.error(
-        { err: String(err?.message ?? err) },
-        "[agents/night] commitAgentInference tx failed — trace still persisted for retry"
-      );
-    }
-
+    // Persist the trace FIRST (commitTxHash filled in later by the background
+    // commit). A slow/stuck on-chain commit must never gate the kill.
     await this.deps.redis.set(
       agentTraceKey(
         chain.chainId,
@@ -979,49 +1054,51 @@ export class NightHandler {
         source: decision.source,
         fallbackReason: decision.fallbackReason,
         llmTxHash: infer.txHash,
-        commitTxHash: commitTxHash ?? null,
+        commitTxHash: null,
         committedAt: Date.now(),
       }),
       "EX",
       IDEMPOTENCY_TTL_SECONDS
     );
 
-    const nightActionRecorded = commitTxHash
-      ? await this.recordNightActionSafe(
-          {
-            chainId: chain.chainId,
-            roomId: event.roomId,
-            dayCount,
-            playerAddress: wallet.address,
-            actionType: toGmNightAction(decision.kind),
-            targetAddress: decision.target,
-            source: decision.source,
-            commitTxHash,
-          },
-          log
-        )
-      : false;
+    // Bridge into GM night-state IMMEDIATELY — this is what doResolveNight reads
+    // to set killTarget/healTarget. Gating it on the commit was the prod D1 bug.
+    const nightActionRecorded = await this.recordNightActionSafe(
+      {
+        chainId: chain.chainId,
+        roomId: event.roomId,
+        dayCount,
+        playerAddress: wallet.address,
+        actionType: toGmNightAction(decision.kind),
+        targetAddress: decision.target,
+        source: decision.source,
+        commitTxHash: null,
+      },
+      log
+    );
 
-    return commitTxHash
-      ? {
-          agent: wallet.address,
-          status: "committed",
-          role,
-          action: decision.kind,
-          target: decision.target,
-          commitTxHash,
-          llmTxHash: infer.txHash,
-          decisionSource: decision.source,
-          nightActionRecorded,
-        }
-      : {
-          agent: wallet.address,
-          status: "commit-failed",
-          role,
-          action: decision.kind,
-          target: decision.target,
-          llmTxHash: infer.txHash,
-          decisionSource: decision.source,
-        };
+    // On-chain audit commit runs in the background with retry; it can no longer
+    // block the night handler or drop the action.
+    this.fireCommitInBackground({
+      chain,
+      wallet,
+      roomIdBig,
+      event,
+      phaseIdHex,
+      actionHash,
+      traceCommitment,
+      log,
+    });
+
+    return {
+      agent: wallet.address,
+      status: nightActionRecorded ? "recorded" : "record-failed",
+      role,
+      action: decision.kind,
+      target: decision.target,
+      llmTxHash: infer.txHash,
+      decisionSource: decision.source,
+      nightActionRecorded,
+    };
   }
 }

@@ -315,7 +315,11 @@ describe("NightHandler", () => {
       chainOpsFor: () => opts.chain,
       mnemonic: TEST_MNEMONIC,
       inferToolsFn: opts.inferToolsFn as any,
-      recordNightAction: opts.recordNightAction,
+      // Prod always wires the GM bridge (index.ts); default a succeeding one so
+      // status reflects bridge health, not a missing test dependency.
+      recordNightAction:
+        opts.recordNightAction ?? vi.fn(async () => ({ recorded: true })),
+      nightCommitRetryDelayMs: 1, // keep background retries instant in tests
     });
   }
 
@@ -338,13 +342,14 @@ describe("NightHandler", () => {
     const handler = buildHandler({ chain, inferToolsFn });
     const outcomes = await handler.handle(nightEvent());
 
+    await handler.waitForBackgroundCommits();
+
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].status).toBe("committed");
+    expect(outcomes[0].status).toBe("recorded");
     expect(outcomes[0].action).toBe("KILL");
     expect(outcomes[0].target?.toLowerCase()).toBe(otherAddr.toLowerCase());
     expect(outcomes[0].decisionSource).toBe("llm");
     expect(outcomes[0].role).toBe(AgentRole.MAFIA);
-    expect(outcomes[0].commitTxHash?.startsWith(COMMIT_TX_HASH_PREFIX)).toBe(true);
 
     expect(inferToolsFn).toHaveBeenCalledTimes(1);
     expect(chain.sendCommitInference).toHaveBeenCalledTimes(1);
@@ -408,7 +413,7 @@ describe("NightHandler", () => {
     });
     const outcomes = await handler.handle(nightEvent());
 
-    expect(outcomes[0].status).toBe("committed");
+    expect(outcomes[0].status).toBe("recorded");
     expect(outcomes[0].nightActionRecorded).toBe(true);
     expect(recordNightAction).toHaveBeenCalledTimes(1);
     expect(recordNightAction).toHaveBeenCalledWith(
@@ -440,13 +445,14 @@ describe("NightHandler", () => {
     const outcomes = await handler.handle(nightEvent());
 
     expect(outcomes).toHaveLength(1);
-    expect(outcomes[0].status).toBe("committed");
+    expect(outcomes[0].status).toBe("recorded");
     expect(outcomes[0].action).toBe("SKIP");
     expect(outcomes[0].target).toBe(ZERO_ADDR);
     expect(outcomes[0].decisionSource).toBe("skip");
     expect(outcomes[0].role).toBe(AgentRole.CITIZEN);
 
     expect(inferToolsFn).not.toHaveBeenCalled();
+    await handler.waitForBackgroundCommits();
     expect(chain.sendCommitInference).toHaveBeenCalledTimes(1);
 
     const cArgs = (chain.sendCommitInference as any).mock.calls[0];
@@ -464,7 +470,7 @@ describe("NightHandler", () => {
     });
     const handler = buildHandler({ chain, inferToolsFn: vi.fn() });
     const outcomes = await handler.handle(nightEvent());
-    expect(outcomes[0].status).toBe("committed");
+    expect(outcomes[0].status).toBe("recorded");
     expect(outcomes[0].action).toBe("SKIP");
     expect(outcomes[0].role).toBe(AgentRole.NONE);
   });
@@ -484,7 +490,7 @@ describe("NightHandler", () => {
     const handler = buildHandler({ chain, inferToolsFn });
     const outcomes = await handler.handle(nightEvent());
 
-    expect(outcomes[0].status).toBe("committed");
+    expect(outcomes[0].status).toBe("recorded");
     expect(outcomes[0].action).toBe("KILL");
     expect(outcomes[0].decisionSource).toBe("fallback");
     expect(outcomes[0].target?.toLowerCase()).toBe(otherAddr.toLowerCase());
@@ -630,18 +636,57 @@ describe("NightHandler", () => {
     );
     const handler = buildHandler({ chain, inferToolsFn });
     const outcomes = await handler.handle(nightEvent());
+    await handler.waitForBackgroundCommits();
 
-    expect(outcomes[0].status).toBe("commit-failed");
+    // Action is RECORDED despite the on-chain commit failing; commit retried.
+    expect(outcomes[0].status).toBe("recorded");
     expect(outcomes[0].action).toBe("KILL");
     expect(outcomes[0].decisionSource).toBe("llm");
+    expect(failingCommit.mock.calls.length).toBeGreaterThan(1);
 
-    // Trace still persisted so a retry can re-issue the commit
+    // Trace still persisted (commitTxHash null) so a later sweep can re-issue.
     const traceRaw = await redis.get(
       agentTraceKey(CHAIN_ID, ROOM_ID.toString(), `D${DAY_COUNT}-NIGHT`, agentAddr)
     );
     expect(traceRaw).not.toBeNull();
     const trace = JSON.parse(traceRaw!);
     expect(trace.commitTxHash).toBeNull();
+  });
+
+  it("commit failure does NOT drop the night action — kill still bridged (prod D1 fix)", async () => {
+    const [agentAddr, otherAddr] = deriveAddrs(2);
+    await setAgentRole(redis as any, CHAIN_ID, ROOM_ID.toString(), agentAddr, AgentRole.MAFIA);
+
+    const cd = encodeToolCalldata("mafiaKill(address)", otherAddr);
+    // Commit hangs/reverts exactly like prod D1 (receipt timeout from tx contention).
+    const failingCommit = vi.fn(async () => {
+      throw new Error("receipt timeout after 120000ms");
+    });
+    const chain = makeFakeChain(
+      {
+        room: { phase: PHASE_NIGHT, dayCount: DAY_COUNT, aliveCount: 2 },
+        players: [activePlayer(agentAddr), activePlayer(otherAddr)],
+        agentSet: new Set([agentAddr.toLowerCase()]),
+        existingCommitment: ZERO32,
+      },
+      { sendCommit: failingCommit }
+    );
+    const recordNightAction = vi.fn(async () => ({ recorded: true }));
+    const inferToolsFn = vi.fn(async () =>
+      makeToolsResult({ pendingToolCalls: [cd] })
+    );
+    const handler = buildHandler({ chain, inferToolsFn, recordNightAction });
+    const outcomes = await handler.handle(nightEvent());
+
+    // The kill reaches GM night-state EVEN THOUGH the on-chain commit failed —
+    // this is the bug that left killTarget=0x0 in prod room 34 D1.
+    expect(recordNightAction).toHaveBeenCalledWith(
+      expect.objectContaining({ actionType: "kill", targetAddress: otherAddr })
+    );
+    expect(outcomes[0].nightActionRecorded).toBe(true);
+    expect(outcomes[0].action).toBe("KILL");
+
+    await (handler as any).waitForBackgroundCommits?.();
   });
 
   it("parallelism: 2 agents (mafia + doctor) → both commit independently", async () => {
@@ -669,6 +714,7 @@ describe("NightHandler", () => {
 
     const handler = buildHandler({ chain, inferToolsFn });
     const outcomes = await handler.handle(nightEvent());
+    await handler.waitForBackgroundCommits();
 
     expect(outcomes).toHaveLength(2);
     expect(outcomes.map((o) => o.action).sort()).toEqual(["HEAL", "KILL"]);
