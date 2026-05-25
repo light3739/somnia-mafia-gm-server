@@ -73,13 +73,25 @@ export interface DayChainOpsExtras {
 const TX_RECEIPT_TIMEOUT_MS = 120_000;
 
 /**
- * Gas cap for an agent vote(). A vote that finalizes the round (tally + eliminate
- * + phase advance) is far heavier than a plain vote; viem's auto-estimate
- * under-budgets it when the round-state shifts between estimate and execution,
- * producing OUT_OF_GAS (the agent's vote is then lost → "AFK"). The frontend
- * reserves 8M for finalizeVoting; mirror that. It's a cap — gas is pay-per-use.
+ * Explicit gas caps for agent write txs. Any tx that can be the one that
+ * FINALIZES a phase (tally+eliminate+advance, role-confirm→DAY, reveal→REVEAL,
+ * shuffle setup) is far heavier than its base case; viem's auto-estimate
+ * under-budgets it when the state shifts between estimate and execution →
+ * OUT_OF_GAS → the action is lost (vote → "AFK"; forcePhaseTimeout → the game
+ * stalls with no live human). Mirror the frontend's KNOWN_LIMITS. Caps only —
+ * gas is pay-per-use, so over-budgeting a light call costs nothing.
  */
-const VOTE_GAS_LIMIT = 8_000_000n;
+const GAS = {
+  vote: 8_000_000n,
+  forcePhaseTimeout: 8_000_000n,
+  startGame: 8_000_000n,
+  commitAndConfirmRole: 3_000_000n,
+  revealDeck: 3_000_000n,
+  shareKeysToAll: 3_000_000n,
+  commitDeck: 2_000_000n,
+  commitInference: 2_000_000n,
+  commitMessage: 2_000_000n,
+} as const;
 
 /**
  * Wait for the receipt AND assert it succeeded. A reverted tx returns a
@@ -177,12 +189,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
         abi: DIAMOND_VOTE_ABI,
         functionName: "vote",
         args: [roomId, target],
-        // A vote that FINALIZES voting (tally + eliminate + advance phase) costs
-        // far more than a plain vote; viem's auto-estimate under-budgets when the
-        // state shifts to make THIS the finalizing vote → OUT_OF_GAS → the vote is
-        // lost and the agent shows "AFK". Budget the heavy path explicitly (the
-        // frontend reserves 8M for finalizeVoting). Pay-per-use; this is only a cap.
-        gas: VOTE_GAS_LIMIT,
+        gas: GAS.vote, // heavy when this vote finalizes the round — see GAS note
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       // Throws on revert / timeout so caller's catch surfaces vote-failed
@@ -199,6 +206,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
         abi: DIAMOND_VOTE_ABI,
         functionName: "forcePhaseTimeout",
         args: [roomId],
+        gas: GAS.forcePhaseTimeout, // advances the phase (heavy) — must not OOG
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "forcePhaseTimeout");
@@ -223,6 +231,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
         abi: AGENT_REGISTRY_ABI,
         functionName: "commitAgentInference",
         args: [roomId, phaseId, actionHash, traceCommitment],
+        gas: GAS.commitInference,
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "commitAgentInference");
@@ -249,6 +258,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
         abi: AGENT_REGISTRY_ABI,
         functionName: "commitAgentMessageV2",
         args: [roomId, phaseId, messageHash],
+        gas: GAS.commitMessage,
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "commitAgentMessageV2");
@@ -355,6 +365,7 @@ export function makePreGameChainOps(chainId: number): PreGameChainOps {
         abi: PREGAME_ABI,
         functionName: "startGame",
         args: [roomId],
+        gas: GAS.startGame,
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "startGame");
@@ -367,6 +378,7 @@ export function makePreGameChainOps(chainId: number): PreGameChainOps {
         abi: PREGAME_ABI,
         functionName: "commitDeck",
         args: [roomId, deckHash],
+        gas: GAS.commitDeck,
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "commitDeck");
@@ -379,6 +391,7 @@ export function makePreGameChainOps(chainId: number): PreGameChainOps {
         abi: PREGAME_ABI,
         functionName: "revealDeck",
         args: [roomId, deck, salt],
+        gas: GAS.revealDeck,
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "revealDeck");
@@ -391,6 +404,7 @@ export function makePreGameChainOps(chainId: number): PreGameChainOps {
         abi: PREGAME_ABI,
         functionName: "shareKeysToAll",
         args: [roomId, recipients, encryptedKeys],
+        gas: GAS.shareKeysToAll,
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "shareKeysToAll");
@@ -403,6 +417,7 @@ export function makePreGameChainOps(chainId: number): PreGameChainOps {
         abi: PREGAME_ABI,
         functionName: "commitAndConfirmRole",
         args: [roomId, roleHash],
+        gas: GAS.commitAndConfirmRole, // last confirm advances to DAY — heavy
         gasPrice: parseGwei(String(gasPriceGwei)),
       });
       await waitForReceiptOrRevert(publicClient, hash, "commitAndConfirmRole");
