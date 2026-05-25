@@ -85,6 +85,8 @@ export interface RoomSnapshot {
 export interface PlayerSnapshot {
   wallet: Address;
   flags: number;
+  /** On-chain display nickname (set at joinRoom). Reliable name source for prompts. */
+  nickname?: string;
 }
 
 /**

@@ -60,6 +60,44 @@ describe("buildDayPrompt concreteness", () => {
     expect(user).not.toContain("No previous messages yet");
   });
 
+  it("tells the agent which player is itself and forbids self-targeting", () => {
+    const A = ("0x" + "a".repeat(40)) as `0x${string}`;
+    const B = ("0x" + "b".repeat(40)) as `0x${string}`;
+    const names: Record<string, string> = { [A.toLowerCase()]: "Alice", [B.toLowerCase()]: "Bob" };
+    const { messages } = buildDayPrompt({
+      ...base,
+      self: A,
+      role: AgentRole.NONE,
+      alive: [A, B],
+      recentChat: [],
+      nameOf: (a: string) => names[a.toLowerCase()] ?? a.slice(0, 7),
+    });
+    const text = messages.join("\n");
+    expect(text).toContain("Alice"); // its own name surfaced
+    expect(text.toLowerCase()).toContain("yourself"); // anti self-accusation instruction
+  });
+
+  it("renders the agent's OWN past messages as 'You', not its nickname (no self-confusion)", () => {
+    const A = ("0x" + "a".repeat(40)) as `0x${string}`;
+    const B = ("0x" + "b".repeat(40)) as `0x${string}`;
+    const names: Record<string, string> = { [A.toLowerCase()]: "Alice", [B.toLowerCase()]: "Bob" };
+    const { messages } = buildDayPrompt({
+      ...base,
+      self: A,
+      role: AgentRole.NONE,
+      alive: [A, B],
+      recentChat: [
+        JSON.stringify({ by: A, text: "I think Bob is mafia", day: 1 }),
+        JSON.stringify({ by: B, text: "no way", day: 1 }),
+      ],
+      nameOf: (a: string) => names[a.toLowerCase()] ?? a.slice(0, 7),
+    });
+    const user = messages[1];
+    expect(user).toContain("You: I think Bob is mafia"); // own line marked "You"
+    expect(user).toContain("Bob: no way");
+    expect(user).not.toContain("Alice: I think Bob is mafia"); // not third-person self
+  });
+
   it("uses nameOf (nicknames) for the alive list and chat lines, not raw addresses", () => {
     const A = ("0x" + "a".repeat(40)) as `0x${string}`;
     const B = ("0x" + "b".repeat(40)) as `0x${string}`;

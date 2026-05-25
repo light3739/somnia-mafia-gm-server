@@ -93,6 +93,8 @@ export interface RoomSnapshot {
 export interface PlayerSnapshot {
   wallet: Address;
   flags: number;
+  /** On-chain display nickname (set at joinRoom). Reliable name source for prompts. */
+  nickname?: string;
 }
 
 export interface DayChainOps {
@@ -184,11 +186,25 @@ export interface DayPromptArgs {
   nameOf?: (addr: string) => string;
 }
 
-function formatChatLine(raw: string, nameOf: (addr: string) => string): string {
+function formatChatLine(
+  raw: string,
+  nameOf: (addr: string) => string,
+  self?: string
+): string {
   try {
     const o = JSON.parse(raw);
     if (o && typeof o.text === "string") {
-      const who = typeof o.by === "string" ? nameOf(o.by) : "player";
+      // The agent's OWN past messages render as "You" so it never mistakes
+      // itself for another player (and never suspects/agrees-with itself).
+      const isSelf =
+        !!self &&
+        typeof o.by === "string" &&
+        o.by.toLowerCase() === self.toLowerCase();
+      const who = isSelf
+        ? "You"
+        : typeof o.by === "string"
+        ? nameOf(o.by)
+        : "player";
       return `${who}: ${o.text}`;
     }
   } catch {
@@ -206,17 +222,19 @@ export function buildDayPrompt(args: DayPromptArgs): {
       ? `You don't know your role yet — play like someone hunting the mafia: react, suspect, defend. Never claim or invent a specific role.`
       : `Your hidden role is ${roleLabel(args.role)}. Play toward your role's goal, but NEVER reveal your role or any role-specific action you have performed.`;
   const nameOf = args.nameOf ?? ((a: string) => a.toLowerCase().slice(0, 7));
+  const me = nameOf(args.self);
   const system = [
     `You are ${args.persona}, a player in a game of Mafia. Stay in character.`,
     roleLine,
-    `Write 1-2 sentences in ${args.language}, conversational and SPECIFIC: respond to the latest messages, name who you agree with / suspect / want to vote, and take a clear stance. Refer to other players by their name. No vague platitudes (e.g. "trust is thin", "stay alert", "it's quiet here"), no markdown, no role names.`,
+    `In this game your name is "${me}" — that is YOU in the player list and the conversation below (your own past messages are shown as "You"). Never suspect, accuse, agree with, vote for, or refer to yourself in the third person.`,
+    `Write 1-2 sentences in ${args.language}, conversational and SPECIFIC: respond to the latest messages, name who you agree with / suspect / want to vote (someone OTHER than yourself), and take a clear stance. Refer to other players by their name. No vague platitudes (e.g. "trust is thin", "stay alert", "it's quiet here"), no markdown, no role names.`,
   ].join(" ");
   const privateMemory = args.privateMemory ?? [];
   const user = [
     `Day ${args.dayNumber}. Players still alive: ${args.alive.map(nameOf).join(", ")}.`,
     args.recentChat.length === 0
       ? `You are the FIRST to speak — nobody has said anything yet. Open with your own read, suspicion, question, or suggestion. Do NOT invent, quote, or reference anything anyone supposedly said, and do not mention the silence.`
-      : `Conversation so far:\n${args.recentChat.map((l) => formatChatLine(l, nameOf)).join("\n")}`,
+      : `Conversation so far:\n${args.recentChat.map((l) => formatChatLine(l, nameOf, args.self)).join("\n")}`,
     privateMemory.length === 0
       ? ``
       : `Private verified facts (let them shape your take; never quote them or reveal how you know):\n${privateMemory.join("\n")}`,
@@ -270,6 +288,9 @@ export class DayHandler {
     const aliveAddrs = players
       .filter((p) => (p.flags & FLAG_ACTIVE) !== 0)
       .map((p) => p.wallet);
+    const nameByAddr = new Map(
+      players.map((p) => [p.wallet.toLowerCase(), p.nickname ?? ""] as const)
+    );
 
     const isAgentResults = await Promise.all(
       aliveAddrs.map((a) =>
@@ -315,6 +336,7 @@ export class DayHandler {
         event,
         phaseIdHex,
         aliveAddrs,
+        nameByAddr,
       }).catch((err): AgentDayOutcome => {
         log.error({ err, agent: wallet.address }, "[agents/day] handleOneAgent threw");
         return {
@@ -373,6 +395,9 @@ export class DayHandler {
     const aliveAddrs = players
       .filter((p) => (p.flags & FLAG_ACTIVE) !== 0)
       .map((p) => p.wallet);
+    const nameByAddr = new Map(
+      players.map((p) => [p.wallet.toLowerCase(), p.nickname ?? ""] as const)
+    );
 
     const phaseIdHex = makePhaseId("DAY", args.dayNumber);
     const event: DayStartedEvent = {
@@ -389,7 +414,7 @@ export class DayHandler {
       logIndex: 0,
     };
 
-    await this.handleOneAgent({ chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs }).catch(
+    await this.handleOneAgent({ chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs, nameByAddr }).catch(
       () => undefined
     );
     return { handled: true };
@@ -402,8 +427,10 @@ export class DayHandler {
     event: DayStartedEvent;
     phaseIdHex: Hex;
     aliveAddrs: Address[];
+    /** address(lowercase) → on-chain nickname, for reliable prompt names. */
+    nameByAddr: Map<string, string>;
   }): Promise<AgentDayOutcome> {
-    const { chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs } = args;
+    const { chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs, nameByAddr } = args;
     const log = logger.child({
       mod: "agents/day",
       chainId: chain.chainId,
@@ -523,9 +550,16 @@ export class DayHandler {
       privateMemory,
       dayNumber: event.dayNumber,
       language: this.language,
-      nameOf: (a) =>
-        this.deps.resolveName?.(chain.chainId, event.roomId, a) ??
-        a.toLowerCase().slice(0, 7),
+      nameOf: (a) => {
+        // On-chain nickname first (reliable — the in-memory resolveName cache is
+        // wiped on every restart/deploy, which left agents naming wallets).
+        const onchain = nameByAddr.get(a.toLowerCase());
+        if (onchain && onchain.trim()) return onchain;
+        return (
+          this.deps.resolveName?.(chain.chainId, event.roomId, a) ??
+          a.toLowerCase().slice(0, 7)
+        );
+      },
     });
     const walletClient = chain.buildAgentWalletClient(wallet.account);
 

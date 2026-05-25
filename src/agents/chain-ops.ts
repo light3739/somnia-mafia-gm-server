@@ -139,6 +139,7 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
       return players.map((p: any) => ({
         wallet: p.wallet as Address,
         flags: Number(p.flags),
+        nickname: typeof p.nickname === "string" ? p.nickname : undefined,
       }));
     },
 
