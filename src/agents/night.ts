@@ -45,6 +45,7 @@ import {
   type PublicClient,
   type WalletClient,
 } from "viem";
+import type { Groth16Proof } from "./groth16.js";
 import { logger } from "../utils/logger.js";
 import {
   agentActionProcessedKey,
@@ -127,6 +128,7 @@ export interface NightChainOps {
     gasPriceGwei: number
   ): Promise<Hex>;
   buildAgentWalletClient(agent: HDAccount): WalletClient;
+  endGameZKAsAgent(roomId: bigint, proof: Groth16Proof, agent: HDAccount): Promise<{ hash: Hex }>;
 }
 
 export type InferToolsFn = typeof defaultInferToolsFn;

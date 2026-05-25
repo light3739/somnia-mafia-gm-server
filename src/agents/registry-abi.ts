@@ -59,6 +59,7 @@ export const DIAMOND_VOTE_ABI = parseAbi([
   "function vote(uint256 roomId, address target)",
   "function startVoting(uint256 roomId)",
   "function forcePhaseTimeout(uint256 roomId)",
+  "function endGameZK(uint256 roomId, uint256[2] a, uint256[2][2] b, uint256[2] c, uint256[6] input)",
 ]);
 
 /**

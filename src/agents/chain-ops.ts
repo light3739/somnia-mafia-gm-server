@@ -31,6 +31,7 @@ import type {
   RoomSnapshot,
   VoteChainOps,
 } from "./voting.js";
+import type { Groth16Proof } from "./groth16.js";
 import type {
   PlayerPregameSnapshot,
   PreGameChainOps,
@@ -79,6 +80,17 @@ export interface DayChainOpsExtras {
     roomId: bigint,
     gasPriceGwei: number
   ): Promise<Hex>;
+  /**
+   * Agent EOA submits endGameZK(roomId, proof) on-chain to finalise the game
+   * with a Groth16 ZK proof. Requires 8M gas cap — the on-chain
+   * calculatePublicStateHash runs 31 Poseidon2 external calls + a Groth16
+   * verify; auto-estimate under-budgets this on Somnia.
+   */
+  endGameZKAsAgent(
+    roomId: bigint,
+    proof: Groth16Proof,
+    agent: HDAccount
+  ): Promise<{ hash: Hex }>;
 }
 
 /** Empirical 120s timeout matches the GM tx helpers in chain.ts. */
@@ -104,6 +116,7 @@ const GAS = {
   commitDeck: 2_000_000n,
   commitInference: 2_000_000n,
   commitMessage: 2_000_000n,
+  endGameZK: 8_000_000n, // calculatePublicStateHash runs 31 Poseidon2 external calls + Groth16 verify — must not OOG
 } as const;
 
 /**
@@ -314,6 +327,29 @@ export function makeVoteChainOps(chainId: number): VoteChainOps & DayChainOpsExt
       // Imported lazily to avoid circular import (sponsor.ts depends on chain.ts).
       const { getSponsorBalance } = await import("./sponsor.js");
       return getSponsorBalance(chainId);
+    },
+
+    async endGameZKAsAgent(roomId, proof, agent) {
+      const wallet = serializedWalletClient(agent, chainObj, rpcUrl);
+      const hash = await wallet.writeContract({
+        address: diamond,
+        abi: DIAMOND_VOTE_ABI, // endGameZK was added to DIAMOND_VOTE_ABI in registry-abi.ts
+        functionName: "endGameZK",
+        args: [
+          roomId,
+          proof.a as [bigint, bigint],
+          proof.b as [[bigint, bigint], [bigint, bigint]],
+          proof.c as [bigint, bigint],
+          proof.input as [bigint, bigint, bigint, bigint, bigint, bigint],
+        ],
+        gas: GAS.endGameZK, // Poseidon2 ×31 + Groth16 verify — must not OOG
+      });
+      await waitForReceiptOrRevert(publicClient, hash, "endGameZK");
+      logger.debug(
+        { hash, agent: agent.address },
+        "[agents/chain-ops] endGameZK receipt success"
+      );
+      return { hash };
     },
   };
 }
