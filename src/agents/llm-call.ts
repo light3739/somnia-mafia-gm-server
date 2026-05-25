@@ -97,7 +97,7 @@ export interface ChainLlmConfig {
 
 const DEFAULTS_50312: ChainLlmConfig = {
   agentRequester: "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
-  store: "0xb2f30e10454668c8c0c6040d1f3fc9b6ebee0649",
+  store: "0x50ade86f88bf07fa4ec513920a51bd2ea44d2b5c", // fixed store (defensive decode); was 0xb2f30e
   agentId: 12847293847561029384n,
 };
 

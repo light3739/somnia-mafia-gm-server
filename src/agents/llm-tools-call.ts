@@ -55,7 +55,7 @@ export interface ChainToolsLlmConfig {
 
 const DEFAULTS_50312: ChainToolsLlmConfig = {
   agentRequester: "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
-  toolsStore: "0x85e7e0e86d0a2d73c099f7a949eba88f84ebde99",
+  toolsStore: "0x72a2fab3729184740efd56114391e2cdc0af77bd", // fixed store (defensive decode); was 0x85e7e0
   agentId: 12847293847561029384n,
 };
 

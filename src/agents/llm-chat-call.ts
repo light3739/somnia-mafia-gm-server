@@ -57,7 +57,7 @@ export interface ChainChatLlmConfig {
 
 const DEFAULTS_50312: ChainChatLlmConfig = {
   agentRequester: "0x037Bb9C718F3f7fe5eCBDB0b600D607b52706776",
-  chatStore: "0x07f351efdbd4478e3f31c2fdbd91d9e97ce76028",
+  chatStore: "0x02e21ff2235adc1df186cabf06e27b75091f0687", // fixed store (defensive decode); was 0x07f351
   agentId: 12847293847561029384n,
 };
 
