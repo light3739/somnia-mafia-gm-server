@@ -3,8 +3,8 @@
  */
 import { Router } from 'express';
 import { getRoom, getPlayers, FLAGS, revealRolesOnChain, reportRoomGasCost } from '../chain.js';
-import { Role } from '../types/contract.js';
 import type { GMStore } from '../stores/index.js';
+import { detectWinner } from '../agents/win-detect.js';
 import { ServerStore } from '../services/serverStore.js';
 import type { Address, Hex } from 'viem';
 import { generateEndGameProof, calculatePoseidon } from '../zk.js';
@@ -78,52 +78,21 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       const rid = BigInt(req.params.roomId);
       const cid = req.query.chainId ? Number(req.query.chainId) : undefined;
       const effectiveCid = cid || 50312;
-      const roomKey = store.getRoomKey(effectiveCid, req.params.roomId);
       const [room, players] = await Promise.all([getRoom(rid, effectiveCid), getPlayers(rid, effectiveCid)]);
       
-      let roles = store.resolvedRoles.get(roomKey);
-
-      // Fallback: Restore roles from Redis if memory is empty
-      if ((!roles || roles.size === 0) && (room.phase >= 3 && room.phase <= 5)) {
-        try {
-          const { getRedis } = await import('../redis.js');
-          const redis = getRedis();
-          if (redis) {
-            const pattern = `gm:room:${effectiveCid}:${req.params.roomId}:role:*`;
-            const keys = await redis.keys(pattern);
-            if (keys.length > 0) {
-              const vals = await redis.mget(keys);
-              const restoredRoles = new Map<string, Role>();
-              for (let i = 0; i < keys.length; i++) {
-                if (vals[i]) {
-                   const addr = keys[i].split(':')[5];
-                   restoredRoles.set(addr, Number(vals[i]) as Role);
-                }
-              }
-              if (restoredRoles.size > 0) {
-                 store.resolvedRoles.set(roomKey, restoredRoles);
-                 roles = restoredRoles;
-                 logger.info({ roomId: req.params.roomId, count: restoredRoles.size }, '[win-check] Restored roles from Redis');
-              }
-            }
-          }
-        } catch (err: any) {
-          logger.error({ err: err.message, roomId: req.params.roomId }, '[win-check] Failed to fallback read roles from Redis');
-        }
-      }
-
       if (room.phase < 3 || room.phase > 5) return res.json({ winDetected: false, message: "Game not active" });
-      if (!roles || roles.size === 0) return res.json({ winDetected: false });
 
-      let mafiaCount = 0, townCount = 0;
-      for (const p of players) {
-        if (Number(p.flags) & FLAGS.ACTIVE) {
-          const r = roles.get(p.wallet.toLowerCase());
-          if (r === Role.MAFIA) mafiaCount++;
-          else if (r !== undefined && r !== Role.NONE) townCount++;
-        }
-      }
-      if (mafiaCount === 0) {
+      const { winner, mafiaCount, townCount } = await detectWinner({
+        roomId: req.params.roomId,
+        chainId: effectiveCid,
+        store,
+        players,
+        phase: room.phase,
+      });
+
+      if (!winner && mafiaCount === 0 && townCount === 0) return res.json({ winDetected: false });
+
+      if (winner === "TOWN") {
         logger.info({ roomId: req.params.roomId }, '[win-check] Town wins detected');
         wsManager.broadcastToRoom(req.params.roomId, effectiveCid, {
           type: 'win-detected',
@@ -131,7 +100,7 @@ export function createWinRoutes(ctx: WinRoutesContext) {
         });
         return res.json({ winDetected: true, result: 'TOWN_WIN' });
       }
-      if (mafiaCount >= townCount) {
+      if (winner === "MAFIA") {
         logger.info({ roomId: req.params.roomId }, '[win-check] Mafia wins detected');
         wsManager.broadcastToRoom(req.params.roomId, effectiveCid, {
           type: 'win-detected',
