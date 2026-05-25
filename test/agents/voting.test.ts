@@ -248,6 +248,71 @@ describe("VotingHandler", () => {
     expect(trace.prompt).toContain(otherAddr);
   });
 
+  it("headless (no alive human): staggers agent votes so they don't all land at once", async () => {
+    const [a1, a2] = deriveAgentAddresses(2);
+    const chain = makeFakeChain({
+      room: { phase: PHASE_VOTING, dayCount: DAY_COUNT, aliveCount: 2 },
+      players: [activePlayer(a1), activePlayer(a2)],
+      agentSet: new Set([a1.toLowerCase(), a2.toLowerCase()]), // both agents → headless
+      existingCommitment: ZERO32,
+    });
+    const inferFn = vi.fn(async () => ({
+      text: `vote ${a1}`,
+      status: 2,
+      requestId: 1n,
+      txHash: LLM_TX_HASH,
+      latencySec: 1,
+    }));
+    const sleep = vi.fn(async () => {});
+    const handler = new VotingHandler({
+      redis: redis as any,
+      chainOpsFor: () => chain,
+      mnemonic: TEST_MNEMONIC,
+      inferFn: inferFn as any,
+      voteStaggerMs: 4000,
+      sleep,
+    } as any);
+
+    await handler.handle(votingEvent());
+
+    // 2 agents: index 0 votes immediately, index 1 waits one stagger.
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(sleep.mock.calls[0][0]).toBe(4000);
+    expect(chain.sendVote).toHaveBeenCalledTimes(2);
+  });
+
+  it("mixed (an alive human present): does NOT stagger — parallel for the voting window", async () => {
+    const [a1, a2] = deriveAgentAddresses(2);
+    const human = "0x00000000000000000000000000000000000000aa" as Address;
+    const chain = makeFakeChain({
+      room: { phase: PHASE_VOTING, dayCount: DAY_COUNT, aliveCount: 3 },
+      players: [activePlayer(a1), activePlayer(a2), activePlayer(human)],
+      agentSet: new Set([a1.toLowerCase(), a2.toLowerCase()]), // human is NOT an agent
+      existingCommitment: ZERO32,
+    });
+    const inferFn = vi.fn(async () => ({
+      text: `vote ${human}`,
+      status: 2,
+      requestId: 1n,
+      txHash: LLM_TX_HASH,
+      latencySec: 1,
+    }));
+    const sleep = vi.fn(async () => {});
+    const handler = new VotingHandler({
+      redis: redis as any,
+      chainOpsFor: () => chain,
+      mnemonic: TEST_MNEMONIC,
+      inferFn: inferFn as any,
+      voteStaggerMs: 4000,
+      sleep,
+    } as any);
+
+    await handler.handle(votingEvent());
+
+    expect(sleep).not.toHaveBeenCalled();
+    expect(chain.sendVote).toHaveBeenCalledTimes(2);
+  });
+
   it("traceCommitment in tx matches the off-chain computation", async () => {
     const [agentAddr, otherAddr] = deriveAgentAddresses(2);
     const llmTarget = otherAddr;

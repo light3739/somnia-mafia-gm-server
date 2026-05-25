@@ -189,6 +189,9 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     mnemonic,
     language,
     ensureFunded,
+    // Headless-only: spread agent votes so a spectator can watch them arrive
+    // instead of an instant flip to NIGHT. Mixed games stay parallel.
+    voteStaggerMs: Number(process.env.AGENTS_VOTE_STAGGER_MS ?? "4000"),
   });
 
   const nightHandler = new NightHandler({
@@ -285,6 +288,9 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
         chainOpsFor(chainId).isAgent(BigInt(roomId), addr as `0x${string}`),
       speakOneAgent: (chainId, roomId, dayNumber, agentAddr) =>
         dh.speakAgentTurn({ chainId, roomId, dayNumber, agentAddr: agentAddr as `0x${string}` }),
+      // Min on-screen time per agent message so a (headless) day is readable,
+      // not a 5s blur. Capped by capMs, so a hung inference never overshoots.
+      paceMs: Number(process.env.AGENTS_TURN_PACE_MS ?? "9000"),
     });
   }
 

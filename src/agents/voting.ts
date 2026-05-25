@@ -163,6 +163,15 @@ export interface VotingHandlerDeps {
    * false if it could not be funded (sponsor at floor). Unset → no gate.
    */
   ensureFunded?: (chainId: number, agent: Address) => Promise<boolean>;
+  /**
+   * Inter-agent vote delay (ms) applied ONLY in headless games (no alive human):
+   * staggers the otherwise-parallel votes so a spectator sees them trickle in
+   * instead of all landing at once + an instant flip to NIGHT. Mixed games keep
+   * the parallel path (must fit the voting window). Default 0 (no stagger).
+   */
+  voteStaggerMs?: number;
+  /** Injectable delay for tests. Default real setTimeout. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 export interface AgentVoteOutcome {
@@ -196,9 +205,14 @@ export class VotingHandler {
     VotingHandlerDeps["chatHistoryFor"]
   >;
   private readonly memoryFor: NonNullable<VotingHandlerDeps["memoryFor"]>;
+  private readonly voteStaggerMs: number;
+  private readonly sleep: (ms: number) => Promise<void>;
 
   constructor(private readonly deps: VotingHandlerDeps) {
     this.maxAgents = deps.maxAgentsPerRoom ?? 6;
+    this.voteStaggerMs = deps.voteStaggerMs ?? 0;
+    this.sleep =
+      deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     // 25s default leaves ~5s of the 30s voting window for the vote tx.
     this.llmWaitMs = deps.llmWaitMs ?? 25_000;
     this.llmGasPriceGwei = deps.llmGasPriceGwei ?? 10;
@@ -284,18 +298,28 @@ export class VotingHandler {
       players.map((p) => [p.wallet.toLowerCase(), p] as const)
     );
 
-    // Parallel: voting window is 30s, sequential N*LLM_LATENCY won't fit.
+    // Headless (no alive human) → stagger votes so a spectator can watch them
+    // arrive; mixed games keep the parallel path (must fit the voting window).
+    const headless = isAgentResults.every((r) => r.flag);
+    const staggerMs = headless ? this.voteStaggerMs : 0;
+
+    // Parallel: voting window is 30s, sequential N*LLM_LATENCY won't fit. In
+    // headless we offset each agent's START by staggerMs*index (still concurrent,
+    // just spread) — bounded well under the voting deadline.
     const outcomes = await Promise.all(
-      myAgents.map((wallet) =>
-        this.handleOneAgent({
-          chain,
-          wallet,
-          roomIdBig,
-          event,
-          dayCount: room.dayCount,
-          allAlive: aliveAddrs,
-          playerByAddr: playersByAddr,
-        }).catch((err) => {
+      myAgents.map((wallet, i) =>
+        (async () => {
+          if (staggerMs > 0 && i > 0) await this.sleep(staggerMs * i);
+          return this.handleOneAgent({
+            chain,
+            wallet,
+            roomIdBig,
+            event,
+            dayCount: room.dayCount,
+            allAlive: aliveAddrs,
+            playerByAddr: playersByAddr,
+          });
+        })().catch((err) => {
           log.error(
             { err, agent: wallet.address },
             "[agents/voting] handleOneAgent threw"
