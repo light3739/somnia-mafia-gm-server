@@ -54,10 +54,51 @@ export async function maybeFinalizeHeadlessWin(
   }
 }
 
-// Filled in Task 4. Stub for now so gating tests pass.
+const ZERO_COMMIT = "14744269619966411208579211824598458697587494354926760081771325075741142829156";
+
 async function runFinalize(
-  _ctx: { chainId: number; roomId: string; rid: bigint; alive: readonly { wallet: string; flags: number | bigint }[]; roles: Map<string, Role>; winner: Winner },
-  _deps: HeadlessEndgameDeps,
+  ctx: { chainId: number; roomId: string; rid: bigint; alive: readonly { wallet: string; flags: number | bigint }[]; roles: Map<string, Role>; winner: Winner },
+  deps: HeadlessEndgameDeps,
 ): Promise<FinalizeOutcome> {
+  const { chainId, roomId, rid, alive, roles, winner } = ctx;
+  const { parseGroth16CallData } = await import("./groth16.js");
+
+  const players = await deps.getPlayers(rid, chainId);
+  const secrets = (await deps.getRoomSecrets(roomId, chainId)) ?? {};
+
+  // zkInput per /end-game-zk: dead players use zero-commitment so the on-chain hash matches.
+  const zkInput = players.map((p) => {
+    const addr = p.wallet.toLowerCase();
+    const liveFlag = Number(p.flags) & FLAG_ACTIVE;
+    const s = liveFlag ? secrets[addr] : undefined;
+    return {
+      role: s?.role === 1 ? 1 : 0,
+      salt: s ? s.salt : "0".repeat(64),
+      commitment: s ? s.commitment : ZERO_COMMIT,
+      isActive: liveFlag ? 1 : 0,
+    };
+  });
+
+  const callData = await deps.generateProof(roomId, zkInput);
+  const proof = parseGroth16CallData(callData);
+
+  // Sign endGameZK with an alive agent of the WINNING faction.
+  const wantMafia = winner === "MAFIA";
+  const signerAddr =
+    alive.map((p) => p.wallet).find((w) => (roles.get(w.toLowerCase()) === Role.MAFIA) === wantMafia)
+    ?? alive[0].wallet;
+  const wallet = deps.walletFor(chainId, roomId, signerAddr as `0x${string}`);
+
+  const { hash } = await deps.sendEndGameZK(rid, proof, wallet, chainId);
+  logger.info({ roomId, chainId, winner, signer: signerAddr, hash }, "[headless-endgame] endGameZK sent by agent");
+
+  // Reveal roles (GM). Needs every player's secret; skip+warn if any missing.
+  const allHaveSecret = players.every((p) => secrets[p.wallet.toLowerCase()]);
+  if (allHaveSecret) {
+    const rv = await deps.revealRoles(rid, chainId);
+    logger.info({ roomId, hash: rv.hash }, "[headless-endgame] roles revealed");
+  } else {
+    logger.warn({ roomId }, "[headless-endgame] secret missing — endGameZK done, reveal skipped");
+  }
   return "finalized";
 }

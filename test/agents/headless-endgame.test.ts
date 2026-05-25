@@ -67,3 +67,64 @@ describe("maybeFinalizeHeadlessWin — gating", () => {
     expect(await maybeFinalizeHeadlessWin({ chainId: 50312, roomId: "9" }, deps as any)).toBe("already-ended");
   });
 });
+
+describe("maybeFinalizeHeadlessWin — finalize", () => {
+  it("mafia win → endGameZK from a MAFIA agent EOA, then revealRoles", async () => {
+    process.env.AGENTS_ENABLED = "true";
+    const deps = baseDeps({
+      getRoomSecrets: vi.fn().mockResolvedValue({
+        [mafia.toLowerCase()]: { role: 1, salt: "00", commitment: "1" },
+        [townA.toLowerCase()]: { role: 0, salt: "01", commitment: "2" },
+      }),
+    });
+    const r = await maybeFinalizeHeadlessWin({ chainId: 50312, roomId: "9" }, deps as any);
+    expect(r).toBe("finalized");
+    expect(deps.generateProof).toHaveBeenCalledTimes(1);
+    expect(deps.walletFor).toHaveBeenCalledWith(50312, "9", mafia); // winning faction signer
+    expect(deps.sendEndGameZK).toHaveBeenCalledTimes(1);
+    expect(deps.revealRoles).toHaveBeenCalledTimes(1);
+  });
+
+  it("town win → endGameZK from a TOWN agent EOA", async () => {
+    process.env.AGENTS_ENABLED = "true";
+    const t2 = "0xT2";
+    const deps = baseDeps({
+      getPlayers: vi.fn().mockResolvedValue([{ wallet: townA, flags: 0x2 }, { wallet: t2, flags: 0x2 }]),
+      rolesFor: vi.fn().mockReturnValue(new Map([[townA.toLowerCase(), Role.CITIZEN], [t2.toLowerCase(), Role.DOCTOR]])),
+      getRoomSecrets: vi.fn().mockResolvedValue({
+        [townA.toLowerCase()]: { role: 0, salt: "00", commitment: "2" },
+        [t2.toLowerCase()]: { role: 0, salt: "01", commitment: "3" },
+      }),
+      walletFor: vi.fn().mockReturnValue({ address: townA }),
+    });
+    expect(await maybeFinalizeHeadlessWin({ chainId: 50312, roomId: "9" }, deps as any)).toBe("finalized");
+    expect(deps.walletFor).toHaveBeenCalledWith(50312, "9", townA);
+    expect(deps.revealRoles).toHaveBeenCalledTimes(1);
+  });
+
+  it("missing secret for a player → endGameZK still sent, reveal skipped", async () => {
+    process.env.AGENTS_ENABLED = "true";
+    const deps = baseDeps({
+      getRoomSecrets: vi.fn().mockResolvedValue({ [mafia.toLowerCase()]: { role: 1, salt: "00", commitment: "1" } }), // townA missing
+    });
+    expect(await maybeFinalizeHeadlessWin({ chainId: 50312, roomId: "9" }, deps as any)).toBe("finalized");
+    expect(deps.sendEndGameZK).toHaveBeenCalledTimes(1);
+    expect(deps.revealRoles).not.toHaveBeenCalled();
+  });
+
+  it("endGameZK revert → releases guard, returns error, no reveal", async () => {
+    process.env.AGENTS_ENABLED = "true";
+    const del = vi.fn();
+    const deps = baseDeps({
+      redis: { set: vi.fn().mockResolvedValue("OK"), del },
+      getRoomSecrets: vi.fn().mockResolvedValue({
+        [mafia.toLowerCase()]: { role: 1, salt: "00", commitment: "1" },
+        [townA.toLowerCase()]: { role: 0, salt: "01", commitment: "2" },
+      }),
+      sendEndGameZK: vi.fn().mockRejectedValue(new Error("execution reverted: No town players")),
+    });
+    expect(await maybeFinalizeHeadlessWin({ chainId: 50312, roomId: "9" }, deps as any)).toBe("error");
+    expect(del).toHaveBeenCalledWith("agents:endgame:50312:9");
+    expect(deps.revealRoles).not.toHaveBeenCalled();
+  });
+});
