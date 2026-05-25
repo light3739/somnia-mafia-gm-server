@@ -152,6 +152,13 @@ export interface NightHandlerDeps {
   recordNightAction?: (
     record: AgentNightActionRecord
   ) => Promise<AgentNightActionRecordResult | void>;
+  /**
+   * Optional headless endgame finalizer. When provided, `handle()` checks at
+   * the very start whether the room is already an all-agent game in a win state
+   * and finalizes via ZK before doing any per-agent night work. Returns the
+   * FinalizeOutcome string; "finalized" means the night should be skipped.
+   */
+  finalizeWin?: (chainId: number, roomId: string) => Promise<string>;
 }
 
 export type NightOutcomeStatus =
@@ -584,6 +591,24 @@ export class NightHandler {
   }
 
   async handle(event: NightStartedEvent): Promise<AgentNightOutcome[]> {
+    if (this.deps.finalizeWin) {
+      try {
+        const outcome = await this.deps.finalizeWin(event.chainId, event.roomId);
+        if (outcome === "finalized") {
+          logger.info(
+            { roomId: event.roomId },
+            "[agents/night] headless win finalized via ZK — skipping night"
+          );
+          return [];
+        }
+      } catch (e: any) {
+        logger.error(
+          { roomId: event.roomId, err: e?.message ?? e },
+          "[agents/night] finalizeWin threw — continuing night"
+        );
+      }
+    }
+
     const chain = this.deps.chainOpsFor(event.chainId);
     const roomIdBig = BigInt(event.roomId);
     const log = logger.child({

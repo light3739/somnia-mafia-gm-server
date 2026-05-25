@@ -6,6 +6,7 @@ import { getRoom, getPlayers, FLAGS, revealRolesOnChain, reportRoomGasCost } fro
 import type { GMStore } from '../stores/index.js';
 import { detectWinner } from '../agents/win-detect.js';
 import { ServerStore } from '../services/serverStore.js';
+import { revealRoomRoles } from '../services/revealRoles.js';
 import type { Address, Hex } from 'viem';
 import { generateEndGameProof, calculatePoseidon } from '../zk.js';
 import { Mutex } from 'async-mutex';
@@ -169,71 +170,20 @@ export function createWinRoutes(ctx: WinRoutesContext) {
       const cid = req.body.chainId;
       const effectiveCid = cid || 50312;
 
-      const [secrets, players, room] = await Promise.all([
-        ServerStore.getRoomSecrets(roomId, effectiveCid),
-        getPlayers(BigInt(roomId), effectiveCid),
-        getRoom(BigInt(roomId), effectiveCid),
-      ]);
+      const result = await revealRoomRoles(BigInt(roomId), effectiveCid, store);
 
-      if (room.phase !== 6) { // GamePhase.ENDED
-        return res.status(400).json({ error: `Room not in ENDED phase (current: ${room.phase})` });
+      if ('skipped' in result) {
+        // Distinguish between phase-mismatch (400) and missing-secrets (400)
+        return res.status(400).json({ error: result.reason });
       }
 
-      if (!secrets || Object.keys(secrets).length === 0) {
-        return res.status(400).json({ error: 'No secrets found for this room' });
-      }
-
-      const playerAddresses: Address[] = [];
-      const mappedRoles: number[] = [];
-      const salts: Hex[] = [];
-
-      for (const p of players) {
-        const addr = p.wallet.toLowerCase();
-        const s = secrets[addr];
-
-        playerAddresses.push(p.wallet as Address);
-
-        if (s) {
-          // Use real role+salt for ALL players (alive or dead) — their roleCommit is their original commit
-          mappedRoles.push(Number(s.role) === 1 ? 1 : 0);
-          const cleanSalt = String(s.salt).startsWith('0x') ? String(s.salt) : ('0x' + String(s.salt));
-          salts.push(cleanSalt as Hex);
-        } else {
-          logger.warn({ roomId, player: addr }, '[reveal-roles] No secret found for player');
-          return res.status(400).json({ error: `No secret found for player ${addr}` });
-        }
-      }
-
-      logger.info({ roomId, playerCount: playerAddresses.length }, '[reveal-roles] Submitting role reveal on-chain...');
-      const { hash } = await revealRolesOnChain(
-        BigInt(roomId),
-        playerAddresses,
-        mappedRoles,
-        salts,
-        effectiveCid,
-      );
-
+      const { hash } = result;
       logger.info({ roomId, hash }, '[reveal-roles] Roles revealed on-chain');
 
       // Report GM gas costs for this room (fire-and-forget)
       reportRoomGasCost(BigInt(roomId), effectiveCid).catch((e: any) =>
         logger.error({ err: e.message, roomId }, '[reveal-roles] reportRoomGasCost failed')
       );
-
-      // Push revealed roles to all WS clients (use GM-resolved roles for full detail)
-      const roomKey = store.getRoomKey(effectiveCid, roomId);
-      const cachedRoles = store.resolvedRoles.get(roomKey);
-      if (cachedRoles) {
-        const roleToString: Record<number, string> = { 1: 'MAFIA', 2: 'DOCTOR', 3: 'DETECTIVE', 4: 'CIVILIAN' };
-        const revealedRoles: Record<string, string> = {};
-        for (const [addr, role] of cachedRoles.entries()) {
-          revealedRoles[addr.toLowerCase()] = roleToString[role as number] || 'UNKNOWN';
-        }
-        wsManager.broadcastToRoom(roomId, effectiveCid, {
-          type: 'roles-revealed',
-          data: { roles: revealedRoles },
-        });
-      }
 
       return res.json({ ok: true, hash });
     } catch (err: unknown) {

@@ -112,6 +112,17 @@ export async function doResolveNight(rid: bigint, store: GMStore, redis: RedisCl
     await resolveNight(rid, killTarget, healTarget, effectiveChainId);
     logger.info({ roomId: roomIdStr }, '[doResolveNight] Night resolved successfully');
 
+    // Fire-and-forget headless endgame check: if all remaining alive players are
+    // agents and a role-win condition exists, finalize via ZK. Self-gates via
+    // SETNX guard in the finalizer — safe to call unconditionally.
+    const { getHeadlessFinalizer } = await import("../agents/headless-endgame-registry.js");
+    getHeadlessFinalizer()?.(effectiveChainId, roomIdStr).catch((e: any) =>
+      logger.warn(
+        { roomId: roomIdStr, err: e?.message ?? e },
+        "[doResolveNight] headless finalize check failed"
+      )
+    );
+
     // Push night result to all WS clients
     wsManager.broadcastToRoom(roomIdStr, effectiveChainId, {
       type: 'night-resolved',

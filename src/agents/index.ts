@@ -11,7 +11,7 @@
  */
 import { parseEther, type Address, type Hex } from "viem";
 import { getRedis } from "../redis.js";
-import { getChainConfig } from "../chain.js";
+import { getChainConfig, getRoom, getPlayers } from "../chain.js";
 import { logger } from "../utils/logger.js";
 import { AgentDispatcher } from "./dispatcher.js";
 import { AgentEventListener } from "./listener.js";
@@ -20,7 +20,7 @@ import { NightHandler } from "./night.js";
 import { DayHandler, type DayBroadcaster } from "./day.js";
 import { PreGameHandler } from "./pregame.js";
 import { makeVoteChainOps, makePreGameChainOps } from "./chain-ops.js";
-import { loadOrGenerateMnemonic } from "./wallets.js";
+import { loadOrGenerateMnemonic, deriveAgentWallet } from "./wallets.js";
 import { ensureAgentFunded, type FundingOps } from "./agent-funding.js";
 import { getSponsorBalance, topUp } from "./sponsor.js";
 import { PhaseTimeoutDriver } from "./phase-timeout.js";
@@ -29,6 +29,10 @@ import type { GMStore } from "../stores/index.js";
 import { recordAgentNightAction } from "./night-action-bridge.js";
 import { registerOnResolved } from "../services/roleResolution.js";
 import { ServerStore } from "../services/serverStore.js";
+import { revealRoomRoles } from "../services/revealRoles.js";
+import { maybeFinalizeHeadlessWin } from "./headless-endgame.js";
+import { setHeadlessFinalizer } from "./headless-endgame-registry.js";
+import { generateEndGameProof } from "../zk.js";
 import { turnController } from "./turnController.js";
 import {
   getCurrentSpeaker,
@@ -194,6 +198,72 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     voteStaggerMs: Number(process.env.AGENTS_VOTE_STAGGER_MS ?? "4000"),
   });
 
+  /**
+   * Headless endgame deps factory — one instance per (chainId, roomId) call so
+   * that deps closing over chainId (isAgent, endGameZK, etc.) always use the
+   * correct chain ops without mutating shared state.
+   */
+  const makeDeps = (cid: number) => ({
+    redis,
+    getRoom: (rid: bigint, chainId: number) => getRoom(rid, chainId),
+    getPlayers: (rid: bigint, chainId: number) => getPlayers(rid, chainId),
+    rolesFor: (chainId: number, roomId: string) =>
+      store?.resolvedRoles.get(store.getRoomKey(chainId, roomId)) ?? new Map(),
+    isAgent: (rid: bigint, addr: `0x${string}`) =>
+      chainOpsFor(cid).isAgent(rid, addr),
+    getRoomSecrets: (roomId: string, chainId: number) =>
+      ServerStore.getRoomSecrets(roomId, chainId),
+    generateProof: (roomId: string, zkInput: any[]) =>
+      generateEndGameProof(roomId, zkInput),
+    sendEndGameZK: (
+      rid: bigint,
+      proof: any,
+      agent: any,
+      chainId: number
+    ) => chainOpsFor(cid).endGameZKAsAgent(rid, proof, agent),
+    revealRoles: async (rid: bigint, chainId: number) => {
+      if (!store) {
+        logger.warn(
+          { roomId: String(rid) },
+          "[agents] revealRoles: no GMStore — skipping reveal"
+        );
+        return { hash: "0x0" as `0x${string}` };
+      }
+      const r = await revealRoomRoles(rid, chainId, store);
+      if ("skipped" in r) {
+        logger.warn(
+          { roomId: String(rid), reason: r.reason },
+          "[agents] revealRoles skipped (endGameZK already landed)"
+        );
+        return { hash: "0x0" as `0x${string}` };
+      }
+      return r;
+    },
+    walletFor: (chainId: number, roomId: string, agentAddr: `0x${string}`) => {
+      // Scan derivation slots 0..maxAgents-1 to find the matching HD account.
+      // maxAgents is small (≤6) so this is fast and stateless.
+      const MAX = 6;
+      for (let idx = 0; idx < MAX; idx++) {
+        const w = deriveAgentWallet({ mnemonic, roomId: BigInt(roomId), idx });
+        if (w.address.toLowerCase() === agentAddr.toLowerCase()) {
+          return w.account;
+        }
+      }
+      // Fallback: derive index 0 and log warning — should not happen in practice.
+      logger.warn(
+        { roomId, agentAddr },
+        "[agents] walletFor: address not matched in derivation slots — falling back to idx 0"
+      );
+      return deriveAgentWallet({ mnemonic, roomId: BigInt(roomId), idx: 0 }).account;
+    },
+  });
+
+  const finalizeHeadlessWin = (cid: number, roomId: string) =>
+    maybeFinalizeHeadlessWin({ chainId: cid, roomId }, makeDeps(cid) as any);
+
+  // Register the finalizer so nightRoutes.ts can fire-and-forget after doResolveNight.
+  setHeadlessFinalizer(finalizeHeadlessWin);
+
   const nightHandler = new NightHandler({
     redis,
     chainOpsFor,
@@ -202,6 +272,7 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     recordNightAction: store
       ? (record) => recordAgentNightAction(record, { store, redis })
       : undefined,
+    finalizeWin: finalizeHeadlessWin,
   });
 
   // 4j pre-game — its chain surface differs from VoteChainOps, so a separate
