@@ -55,12 +55,17 @@ import {
 import { matchWalletsToAgents, type AgentWallet } from "./wallets.js";
 import { voteActionHash } from "./registry-abi.js";
 import { loadMemoryPromptLines } from "./memory.js";
+import {
+  loadPublicGameContext,
+  loadRecentPromptChat,
+} from "./strategic-context.js";
 
 // FLAGS bits mirror src/types/contract.ts. Inlined to keep this module free of
 // cross-imports that might pull in heavy ABI dependencies under test.
 const FLAG_ACTIVE = 0x2;
 const FLAG_HAS_VOTED = 0x4;
 const PHASE_VOTING = 4;
+const HEADLESS_STALL_BREAKER_ROUNDS = 3;
 
 /** Single VOTING_STARTED event shape (mirrors events.ts; relisted to avoid import cycle). */
 export interface VotingStartedEvent {
@@ -220,7 +225,9 @@ export class VotingHandler {
     this.inferFn = deps.inferFn ?? defaultInferFn;
     this.language = deps.language ?? "English";
     this.chatHistoryFor =
-      deps.chatHistoryFor ?? (async () => []);
+      deps.chatHistoryFor ??
+      ((chainId, roomId) =>
+        loadRecentPromptChat(this.deps.redis, chainId, roomId));
     this.memoryFor =
       deps.memoryFor ??
       ((chainId, roomId, agent) =>
@@ -318,6 +325,7 @@ export class VotingHandler {
             dayCount: room.dayCount,
             allAlive: aliveAddrs,
             playerByAddr: playersByAddr,
+            headless,
           });
         })().catch((err) => {
           log.error(
@@ -348,8 +356,9 @@ export class VotingHandler {
     dayCount: number;
     allAlive: Address[];
     playerByAddr: Map<string, PlayerSnapshot>;
+    headless: boolean;
   }): Promise<AgentVoteOutcome> {
-    const { chain, wallet, roomIdBig, event, dayCount, allAlive, playerByAddr } =
+    const { chain, wallet, roomIdBig, event, dayCount, allAlive, playerByAddr, headless } =
       args;
     const log = logger.child({
       mod: "agents/voting",
@@ -451,12 +460,25 @@ export class VotingHandler {
       event.roomId,
       wallet.address
     ).catch(() => []);
+    const nameOf = (addr: string) => {
+      const nick = playerByAddr.get(addr.toLowerCase())?.nickname?.trim();
+      return nick || `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+    };
+    const gameContext = await loadPublicGameContext(this.deps.redis, {
+      chainId: chain.chainId,
+      roomId: event.roomId,
+      currentDay: dayCount,
+      alive: allAlive,
+      self: wallet.address,
+      nameOf,
+    }).catch(() => ({ lines: [], consensusTarget: null, stalledVoteRounds: 0 }));
 
     const { prompt, system, allowedValues } = buildVotePrompt({
       self: wallet.address,
       alive: allAlive,
       publicChat: chatHistory,
       privateMemory,
+      publicContext: gameContext.lines,
       dayCount,
       language: this.language,
     });
@@ -501,11 +523,24 @@ export class VotingHandler {
       };
     }
 
-    const decision = resolveDecision(infer.text, {
+    let decision = resolveDecision(infer.text, {
       self: wallet.address,
       alive: allAlive,
       action: "vote",
+      fallbackTarget: gameContext.consensusTarget,
     });
+    if (
+      headless &&
+      gameContext.stalledVoteRounds >= HEADLESS_STALL_BREAKER_ROUNDS &&
+      gameContext.consensusTarget &&
+      decision.target.toLowerCase() !== gameContext.consensusTarget.toLowerCase()
+    ) {
+      decision = {
+        target: gameContext.consensusTarget,
+        source: "fallback",
+        fallbackReason: `headless stall breaker after ${gameContext.stalledVoteRounds} no-elimination rounds`,
+      };
+    }
 
     log.info(
       {
