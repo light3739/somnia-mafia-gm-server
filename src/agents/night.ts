@@ -62,7 +62,7 @@ import {
   type InferToolsChatResult,
   type OnchainTool,
 } from "./llm-tools-call.js";
-import { matchWalletsToAgents, type AgentWallet } from "./wallets.js";
+import { matchWalletsToAgents, agentDeriveCount, type AgentWallet } from "./wallets.js";
 import {
   nightActionHash,
   type NightActionKind,
@@ -689,7 +689,7 @@ export class NightHandler {
       this.deps.mnemonic,
       roomIdBig,
       onChainAgentSet,
-      this.maxAgents
+      agentDeriveCount(players.length)
     );
     if (myAgents.length === 0) {
       log.warn(

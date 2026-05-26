@@ -59,7 +59,7 @@ import {
   type CommitStatus,
   type MsgKind,
 } from "./trace.js";
-import { matchWalletsToAgents, type AgentWallet } from "./wallets.js";
+import { matchWalletsToAgents, agentDeriveCount, type AgentWallet } from "./wallets.js";
 import {
   inferChatOnSomnia as defaultInferChatFn,
   hasUsableChatStore,
@@ -341,7 +341,7 @@ export class DayHandler {
       this.deps.mnemonic,
       roomIdBig,
       onChainAgentSet,
-      this.maxAgents
+      agentDeriveCount(players.length)
     );
     if (myAgents.length === 0) return [];
 
@@ -416,16 +416,16 @@ export class DayHandler {
     const room = await chain.getRoom(roomIdBig).catch(() => null);
     if (!room || room.phase !== PHASE_DAY) return { handled: false };
 
+    const players = await chain.getPlayers(roomIdBig);
     const ours = matchWalletsToAgents(
       this.deps.mnemonic,
       roomIdBig,
       [args.agentAddr],
-      this.maxAgents
+      agentDeriveCount(players.length)
     );
     if (ours.length === 0) return { handled: false };
     const wallet = ours[0];
 
-    const players = await chain.getPlayers(roomIdBig);
     const aliveAddrs = players
       .filter((p) => (p.flags & FLAG_ACTIVE) !== 0)
       .map((p) => p.wallet);

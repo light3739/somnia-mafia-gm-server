@@ -52,7 +52,7 @@ import {
   inferStringOnSomnia as defaultInferFn,
   type InferStringResult,
 } from "./llm-call.js";
-import { matchWalletsToAgents, type AgentWallet } from "./wallets.js";
+import { matchWalletsToAgents, agentDeriveCount, type AgentWallet } from "./wallets.js";
 import { voteActionHash } from "./registry-abi.js";
 import { loadMemoryPromptLines } from "./memory.js";
 import {
@@ -282,15 +282,16 @@ export class VotingHandler {
       return [];
     }
 
+    const deriveCount = agentDeriveCount(players.length);
     const myAgents = matchWalletsToAgents(
       this.deps.mnemonic,
       roomIdBig,
       onChainAgentSet,
-      this.maxAgents
+      deriveCount
     );
     if (myAgents.length === 0) {
       log.warn(
-        { onChainAgentSet, derivedCount: this.maxAgents },
+        { onChainAgentSet, derivedCount: deriveCount },
         "[agents/voting] none of the on-chain agents match our HD mnemonic — different gm instance or wrong mnemonic in env"
       );
       return [];

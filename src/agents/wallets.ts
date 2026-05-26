@@ -77,9 +77,26 @@ export function loadOrGenerateMnemonic(envVar = "AGENT_MASTER_MNEMONIC"): string
 }
 
 /**
+ * How many HD slots a driver must derive to be able to match every agent a
+ * room could hold. Agents are registered at idx = playersCount-at-fill + i
+ * (see fill-room.ts), so the highest idx is offset by the humans already in
+ * the room — a fixed `6` window orphans any agent past idx 5 (e.g. the 6th
+ * agent in a room with a human → idx 6, never matched, never driven).
+ *
+ * Mirrors the wider window sweep.ts already uses. `+3` slack covers a player
+ * leaving (current count < the max idx ever assigned); `12` floor keeps small
+ * rooms generous. Cost is negligible — extra candidates are derived
+ * deterministically and dropped if their address isn't on-chain.
+ */
+export function agentDeriveCount(playerCount: number): number {
+  return Math.max(12, playerCount + 3);
+}
+
+/**
  * For an on-chain agent set, find the (idx, account) tuple that matches each
- * address. Caller supplies the candidate range (0..maxAgents-1) — typically 6
- * for a 6-player room. Unmatched addresses are dropped (not our agents).
+ * address. Caller supplies the candidate range (0..maxAgents-1). Size it with
+ * `agentDeriveCount(playersCount)` — a fixed small window orphans offset
+ * indices. Unmatched addresses are dropped (not our agents).
  */
 export function matchWalletsToAgents(
   mnemonic: string,
