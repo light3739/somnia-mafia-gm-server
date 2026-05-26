@@ -37,6 +37,11 @@ export function agentActionProcessedKey(
   return `${NS}:action:${chainId}:${roomId}:${phaseId}:${agent.toLowerCase()}:${actionType}`;
 }
 
+/** Room-level mutex for operator-triggered lobby fills. */
+export function agentFillRoomLockKey(chainId: number, roomId: string): string {
+  return `${NS}:filllock:${chainId}:${roomId}`;
+}
+
 export function lastBlockKey(chainId: number, diamond: Hex): string {
   return `${NS}:lastBlock:${chainId}:${diamond.toLowerCase()}`;
 }

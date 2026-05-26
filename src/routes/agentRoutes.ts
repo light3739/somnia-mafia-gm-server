@@ -102,7 +102,13 @@ export function createAgentRoutes(ctx: AgentRoutesContext) {
         });
       }
       const result = await fillRoomWithAgents(
-        { chainId, roomId, agentCount, nicknamePrefix },
+        {
+          chainId,
+          roomId,
+          agentCount,
+          maxAgentsInRoom: agentCount,
+          nicknamePrefix,
+        },
         { redis }
       );
 
@@ -111,6 +117,9 @@ export function createAgentRoutes(ctx: AgentRoutesContext) {
         roomId: result.roomId,
         chainId: result.chainId,
         sponsor: result.sponsor,
+        agentsInRoomBefore: result.agentsInRoomBefore,
+        targetAgentsInRoom: result.targetAgentsInRoom,
+        agentsToAdd: result.agentsToAdd,
         outcomes: result.outcomes,
       });
     } catch (err: any) {

@@ -38,6 +38,7 @@ import {
 } from "../../src/agents/fill-room.js";
 import * as sponsorMod from "../../src/agents/sponsor.js";
 import { deriveAgentWallet } from "../../src/agents/wallets.js";
+import { agentFillRoomLockKey } from "../../src/agents/redis-keys.js";
 
 // ── Fake redis ─────────────────────────────────────────────────────────────
 class FakeRedis {
@@ -79,6 +80,8 @@ interface ChainState {
   room: { phase: number; playersCount: number; maxPlayers: number; depositPerPlayer: bigint };
   entryFee: bigint;
   existingPlayers: { wallet: string }[];
+  /** addresses registered in AgentRegistryFacet.isAgent */
+  registeredAgents?: Set<string>;
   /** keyed by lowercase agent addr; throws given error from joinRoom */
   joinFailures?: Map<string, string>;
   /** keyed by lowercase agent addr; throws given error from registerAgent */
@@ -102,7 +105,7 @@ function buildFakeChainAccess(state: ChainState): {
     waitForReceipt: Mock;
   };
 } {
-  const readContract = vi.fn(async ({ functionName }: any) => {
+  const readContract = vi.fn(async ({ functionName, args }: any) => {
     switch (functionName) {
       case "getRoom":
         return state.room;
@@ -110,6 +113,8 @@ function buildFakeChainAccess(state: ChainState): {
         return state.existingPlayers;
       case "getEntryFee":
         return state.entryFee;
+      case "isAgent":
+        return state.registeredAgents?.has(String(args[1]).toLowerCase()) ?? false;
       default:
         throw new Error(`unmocked readContract: ${functionName}`);
     }
@@ -340,6 +345,106 @@ describe("fillRoomWithAgents", () => {
     expect(skipped?.agent.toLowerCase()).toBe(w0.address.toLowerCase());
     expect(result.outcomes.some((o) => o.status === "filled")).toBe(true);
     expect(vi.mocked(sponsorMod.topUp)).toHaveBeenCalledTimes(1);
+  });
+
+  it("targeted fill is a no-op once the room already has the target agent count", async () => {
+    defaultSponsor();
+    const agents = [0, 1, 2].map((idx) =>
+      deriveAgentWallet({ mnemonic: TEST_MNEMONIC, roomId: 1n, idx })
+    );
+    const { access, spies } = buildFakeChainAccess({
+      room: {
+        phase: 0,
+        playersCount: 4,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [
+        { wallet: "0x1111111111111111111111111111111111111111" },
+        ...agents.map((w) => ({ wallet: w.address })),
+      ],
+      registeredAgents: new Set(agents.map((w) => w.address.toLowerCase())),
+    });
+
+    const result = await fillRoomWithAgents(
+      { chainId: 50312, roomId: 1n, agentCount: 3, maxAgentsInRoom: 3 },
+      {
+        redis: redis as any,
+        loadMnemonic: () => TEST_MNEMONIC,
+        chainAccessOverride: access,
+      }
+    );
+
+    expect(result.agentsInRoomBefore).toBe(3);
+    expect(result.agentsToAdd).toBe(0);
+    expect(result.outcomes).toEqual([]);
+    expect(vi.mocked(sponsorMod.topUp)).not.toHaveBeenCalled();
+    expect(spies.gmWrite).not.toHaveBeenCalled();
+  });
+
+  it("targeted fill adds only the missing agents up to the target", async () => {
+    defaultSponsor();
+    const existingAgents = [0, 1].map((idx) =>
+      deriveAgentWallet({ mnemonic: TEST_MNEMONIC, roomId: 1n, idx })
+    );
+    const { access, spies } = buildFakeChainAccess({
+      room: {
+        phase: 0,
+        playersCount: 3,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [
+        { wallet: "0x1111111111111111111111111111111111111111" },
+        ...existingAgents.map((w) => ({ wallet: w.address })),
+      ],
+      registeredAgents: new Set(existingAgents.map((w) => w.address.toLowerCase())),
+    });
+
+    const result = await fillRoomWithAgents(
+      { chainId: 50312, roomId: 1n, agentCount: 3, maxAgentsInRoom: 3 },
+      {
+        redis: redis as any,
+        loadMnemonic: () => TEST_MNEMONIC,
+        chainAccessOverride: access,
+      }
+    );
+
+    expect(result.agentsInRoomBefore).toBe(2);
+    expect(result.agentsToAdd).toBe(1);
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes[0].status).toBe("filled");
+    expect(vi.mocked(sponsorMod.topUp)).toHaveBeenCalledTimes(1);
+    expect(spies.gmWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("room-level fill lock rejects a second fill while one is already running", async () => {
+    await redis.set(agentFillRoomLockKey(50312, "1"), "other", "EX", 900, "NX");
+    defaultSponsor();
+    const { access } = buildFakeChainAccess({
+      room: {
+        phase: 0,
+        playersCount: 0,
+        maxPlayers: 6,
+        depositPerPlayer: parseEther("0.01"),
+      },
+      entryFee: 0n,
+      existingPlayers: [],
+    });
+
+    await expect(
+      fillRoomWithAgents(
+        { chainId: 50312, roomId: 1n, agentCount: 3, maxAgentsInRoom: 3 },
+        {
+          redis: redis as any,
+          loadMnemonic: () => TEST_MNEMONIC,
+          chainAccessOverride: access,
+        }
+      )
+    ).rejects.toThrow(/already in progress/);
+    expect(vi.mocked(sponsorMod.topUp)).not.toHaveBeenCalled();
   });
 
   it("top-up failure for one agent: slot marked topup-failed, others fill", async () => {

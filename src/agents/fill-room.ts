@@ -51,6 +51,7 @@ import type { Redis } from "ioredis";
 import { logger } from "../utils/logger.js";
 import { getChainConfig, signJoinPermit } from "../chain.js";
 import {
+  AGENT_REGISTRY_ABI,
   AGENT_REGISTRY_WRITE_ABI,
   DIAMOND_LOBBY_ABI,
   DIAMOND_VOTE_ABI,
@@ -62,7 +63,11 @@ import {
 } from "./wallets.js";
 import { ensureAgentEciesKeypair } from "./ecies-keys.js";
 import { topUp, getSponsorAddress, getSponsorBalance } from "./sponsor.js";
-import { agentActionProcessedKey, IDEMPOTENCY_TTL_SECONDS } from "./redis-keys.js";
+import {
+  agentActionProcessedKey,
+  agentFillRoomLockKey,
+  IDEMPOTENCY_TTL_SECONDS,
+} from "./redis-keys.js";
 
 const ZERO_ADDR: Address = "0x0000000000000000000000000000000000000000";
 const PHASE_LOBBY = 0;
@@ -91,7 +96,10 @@ function defaultGasReserve(): bigint {
 export interface FillRoomRequest {
   chainId: number;
   roomId: bigint;
+  /** Number to add in this call. When maxAgentsInRoom is set, this is capped by the target gap. */
   agentCount: number;
+  /** Idempotent target: do not let registered agents in the room exceed this count. */
+  maxAgentsInRoom?: number;
   nicknamePrefix?: string;
   /** Override per-agent funding amount (in wei). Defaults to entryFee + deposit + gasReserve. */
   perAgentFundingWei?: bigint;
@@ -128,6 +136,9 @@ export interface FillRoomResult {
   roomId: string;
   chainId: number;
   sponsor: Address;
+  agentsInRoomBefore: number;
+  targetAgentsInRoom?: number;
+  agentsToAdd: number;
   outcomes: AgentFillOutcome[];
 }
 
@@ -171,6 +182,39 @@ function defaultChainAccess(chainId: number): FillChainAccess {
   };
 }
 
+function fillLockTtlSeconds(): number {
+  const raw = Number(process.env.AGENT_FILL_LOCK_TTL_SECONDS ?? "900");
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 900;
+}
+
+function candidateIndices(startIdx: number, maxDerive: number): number[] {
+  const start = Math.max(0, Math.min(startIdx, maxDerive));
+  const indices: number[] = [];
+  for (let i = start; i < maxDerive; i++) indices.push(i);
+  for (let i = 0; i < start; i++) indices.push(i);
+  return indices;
+}
+
+async function readRegisteredAgentAddresses(args: {
+  publicClient: PublicClient;
+  diamond: Address;
+  roomId: bigint;
+  players: readonly { wallet: Address }[];
+}): Promise<Address[]> {
+  const flags = await Promise.all(
+    args.players.map(async (p) => ({
+      wallet: p.wallet,
+      isAgent: (await args.publicClient.readContract({
+        address: args.diamond,
+        abi: AGENT_REGISTRY_ABI,
+        functionName: "isAgent",
+        args: [args.roomId, p.wallet],
+      })) as boolean,
+    }))
+  );
+  return flags.filter((p) => p.isAgent).map((p) => p.wallet);
+}
+
 /** Hashes for the manifest — stable strings so post-game audit can recompute. */
 const POLICY_HASH = keccak256(toBytes("MAFIA_AGENT_POLICY_V1"));
 const MODEL_HASH = keccak256(toBytes("somnia-llm-12847293847561029384"));
@@ -182,9 +226,49 @@ export async function fillRoomWithAgents(
   req: FillRoomRequest,
   deps: FillRoomDeps
 ): Promise<FillRoomResult> {
+  const lockKey = agentFillRoomLockKey(req.chainId, req.roomId.toString());
+  const lockToken = `${process.pid}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  const claimed = await deps.redis.set(
+    lockKey,
+    lockToken,
+    "EX",
+    fillLockTtlSeconds(),
+    "NX"
+  );
+  if (claimed !== "OK") {
+    throw new Error(`fill-room already in progress for room ${req.roomId}`);
+  }
+
+  try {
+    return await fillRoomWithAgentsLocked(req, deps);
+  } finally {
+    try {
+      const current = await deps.redis.get(lockKey);
+      if (current === lockToken) await deps.redis.del(lockKey);
+    } catch (err: any) {
+      logger.warn(
+        { lockKey, err: String(err?.message ?? err) },
+        "[agents/fill] failed to release room fill lock"
+      );
+    }
+  }
+}
+
+async function fillRoomWithAgentsLocked(
+  req: FillRoomRequest,
+  deps: FillRoomDeps
+): Promise<FillRoomResult> {
   const { chainId, roomId, agentCount } = req;
   if (agentCount < 1 || agentCount > 6) {
     throw new Error(`agentCount out of range [1, 6]: ${agentCount}`);
+  }
+  if (
+    req.maxAgentsInRoom != null &&
+    (req.maxAgentsInRoom < 1 || req.maxAgentsInRoom > 6)
+  ) {
+    throw new Error(
+      `maxAgentsInRoom out of range [1, 6]: ${req.maxAgentsInRoom}`
+    );
   }
 
   const mnemonic = (deps.loadMnemonic ?? loadOrGenerateMnemonic)();
@@ -213,9 +297,47 @@ export async function fillRoomWithAgents(
   }
   const playersCount = Number(room.playersCount);
   const maxPlayers = Number(room.maxPlayers);
-  if (playersCount + agentCount > maxPlayers) {
+  const existingPlayers = (await publicClient.readContract({
+    address: diamond,
+    abi: DIAMOND_VOTE_ABI,
+    functionName: "getPlayers",
+    args: [roomId],
+  })) as readonly { wallet: Address }[];
+  const registeredAgentAddrs = await readRegisteredAgentAddresses({
+    publicClient,
+    diamond,
+    roomId,
+    players: existingPlayers,
+  });
+  const targetAgentsInRoom = req.maxAgentsInRoom;
+  const targetGap =
+    targetAgentsInRoom == null
+      ? agentCount
+      : Math.max(0, targetAgentsInRoom - registeredAgentAddrs.length);
+  const agentsToAdd = Math.min(agentCount, targetGap);
+
+  if (targetAgentsInRoom != null && agentsToAdd === 0) {
+    log.info(
+      {
+        registeredAgents: registeredAgentAddrs.length,
+        targetAgentsInRoom,
+      },
+      "[agents/fill] target agent count already reached"
+    );
+    return {
+      roomId: roomId.toString(),
+      chainId,
+      sponsor: sponsorAddr,
+      agentsInRoomBefore: registeredAgentAddrs.length,
+      targetAgentsInRoom,
+      agentsToAdd: 0,
+      outcomes: [],
+    };
+  }
+
+  if (playersCount + agentsToAdd > maxPlayers) {
     throw new Error(
-      `room ${roomId} can fit only ${maxPlayers - playersCount} more agent(s), requested ${agentCount}`
+      `room ${roomId} can fit only ${maxPlayers - playersCount} more agent(s), requested ${agentsToAdd}`
     );
   }
 
@@ -240,41 +362,58 @@ export async function fillRoomWithAgents(
       depositPerPlayer: depositPerPlayer.toString(),
       gasReserve: gasReserve.toString(),
       perAgentFunding: perAgentFunding.toString(),
-      agentCount,
+      requestedAgentCount: agentCount,
+      agentsToAdd,
+      registeredAgents: registeredAgentAddrs.length,
+      targetAgentsInRoom,
     },
     "[agents/fill] preflight"
   );
 
   const sponsorBalance = await getSponsorBalance(chainId);
-  const totalNeeded = perAgentFunding * BigInt(agentCount);
+  const totalNeeded = perAgentFunding * BigInt(agentsToAdd);
   if (sponsorBalance < totalNeeded) {
     throw new Error(
-      `sponsor balance ${sponsorBalance} wei < required ${totalNeeded} wei for ${agentCount} agents`
+      `sponsor balance ${sponsorBalance} wei < required ${totalNeeded} wei for ${agentsToAdd} agents`
     );
   }
 
-  // ── Derive wallets. Start index = playersCount so re-runs after partial
-  // failures skip slots already filled. (HD path is bucketed per-room so
-  // collisions between roomA and roomB are not an issue.)
-  const wallets: AgentWallet[] = Array.from({ length: agentCount }, (_, i) =>
-    deriveAgentWallet({ mnemonic, roomId, idx: playersCount + i })
+  // ── Derive wallets. Legacy callers get the original "append after current
+  // playersCount" behaviour. Targeted fills scan deterministic room-local HD
+  // slots and choose only wallets not already in the room, making repeat clicks
+  // idempotent instead of additive.
+  const inRoom = new Set<string>(
+    existingPlayers.map((p) => p.wallet.toLowerCase())
   );
+  const maxDerive = Number(
+    process.env.AGENT_FILL_MAX_DERIVE ??
+      String(Math.max(12, maxPlayers + agentsToAdd + 3))
+  );
+  const wallets: AgentWallet[] =
+    targetAgentsInRoom == null
+      ? Array.from({ length: agentsToAdd }, (_, i) =>
+          deriveAgentWallet({ mnemonic, roomId, idx: playersCount + i })
+        )
+      : [];
+  if (targetAgentsInRoom != null) {
+    for (const idx of candidateIndices(0, maxDerive)) {
+      const w = deriveAgentWallet({ mnemonic, roomId, idx });
+      if (inRoom.has(w.address.toLowerCase())) continue;
+      wallets.push(w);
+      if (wallets.length >= agentsToAdd) break;
+    }
+    if (wallets.length < agentsToAdd) {
+      throw new Error(
+        `could derive only ${wallets.length}/${agentsToAdd} unused agent wallet(s)`
+      );
+    }
+  }
   log.info(
     { agents: wallets.map((w) => `${w.idx}:${w.address}`) },
     "[agents/fill] derived agent wallets"
   );
 
   // ── Skip wallets already in the room (idempotency on partial-run state).
-  const existingPlayers: any = await publicClient.readContract({
-    address: diamond,
-    abi: DIAMOND_VOTE_ABI,
-    functionName: "getPlayers",
-    args: [roomId],
-  });
-  const inRoom = new Set<string>(
-    (existingPlayers as { wallet: Address }[]).map((p) => p.wallet.toLowerCase())
-  );
-
   const outcomes: AgentFillOutcome[] = [];
   const todo: AgentWallet[] = [];
   for (const w of wallets) {
@@ -291,7 +430,15 @@ export async function fillRoomWithAgents(
 
   if (todo.length === 0) {
     log.info("[agents/fill] all candidate agents already in room");
-    return { roomId: roomId.toString(), chainId, sponsor: sponsorAddr, outcomes };
+    return {
+      roomId: roomId.toString(),
+      chainId,
+      sponsor: sponsorAddr,
+      agentsInRoomBefore: registeredAgentAddrs.length,
+      targetAgentsInRoom,
+      agentsToAdd,
+      outcomes,
+    };
   }
 
   const gasPriceGwei =
@@ -513,7 +660,15 @@ export async function fillRoomWithAgents(
   // Sort by idx for deterministic operator output (parallel join may finish out of order).
   outcomes.sort((a, b) => a.idx - b.idx);
 
-  return { roomId: roomId.toString(), chainId, sponsor: sponsorAddr, outcomes };
+  return {
+    roomId: roomId.toString(),
+    chainId,
+    sponsor: sponsorAddr,
+    agentsInRoomBefore: registeredAgentAddrs.length,
+    targetAgentsInRoom,
+    agentsToAdd,
+    outcomes,
+  };
 }
 
 // Re-export for callers that want to construct manifest hashes themselves.
