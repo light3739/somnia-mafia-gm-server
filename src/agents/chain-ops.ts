@@ -110,13 +110,13 @@ const GAS = {
   startVoting: 8_000_000n,
   forcePhaseTimeout: 8_000_000n,
   startGame: 8_000_000n,
-  commitAndConfirmRole: 3_000_000n,
-  revealDeck: 3_000_000n,
-  shareKeysToAll: 3_000_000n,
+  commitAndConfirmRole: 8_000_000n, // last confirm advances to DAY — heavy, must not OOG
+  revealDeck: 15_000_000n, // shuffle reveal does the full deck decrypt (~14.5M) — must not OOG
+  shareKeysToAll: 8_000_000n,
   commitDeck: 2_000_000n,
   commitInference: 2_000_000n,
   commitMessage: 2_000_000n,
-  endGameZK: 8_000_000n, // calculatePublicStateHash runs 31 Poseidon2 external calls + Groth16 verify — must not OOG
+  endGameZK: 120_000_000n, // calculatePublicStateHash = 31 EXTERNAL Poseidon2 staticcalls on a very expensive on-chain Poseidon2 (~1.9M gas EACH ≈ 59M) + Groth16 pairing. Measured live: 30M→OOG(used 29M), 60M→OOG(used 57.7M) — cost is ~60M+, so 60M was right at the edge. Block limit ~333M; budget 120M.
 } as const;
 
 /**

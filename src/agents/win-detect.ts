@@ -106,6 +106,40 @@ export async function resolveRolesWithFallback(args: ResolveRolesArgs): Promise<
     }
   }
 
+  // Second fallback: all-agent games persist roles in the AGENT keyspace
+  // (agents:role:<chain>:<room>:<addr>), not the gm:room keyspace which is only
+  // written when a human submits an SRA key (/submit-sra-key). Without this an
+  // all-agent (headless) game resolves to an empty roles map → computeWinner
+  // sees townCount=0 → the ZK endgame finalizer no-ops → the game falls through
+  // to the contract's last-player-standing failsafe instead of endGameZK.
+  if ((!roles || roles.size === 0) && phase >= 3 && phase <= 5) {
+    try {
+      const { getRedis } = await import('../redis.js');
+      const redis = getRedis();
+      if (redis) {
+        const pattern = `agents:role:${chainId}:${roomId}:*`;
+        const keys = await redis.keys(pattern);
+        if (keys.length > 0) {
+          const vals = await redis.mget(keys);
+          const agentRoles = new Map<string, Role>();
+          for (let i = 0; i < keys.length; i++) {
+            const addr = keys[i].split(':')[4];
+            if (vals[i] && addr) {
+              agentRoles.set(addr.toLowerCase(), Number(vals[i]) as Role);
+            }
+          }
+          if (agentRoles.size > 0) {
+            store.resolvedRoles.set(roomKey, agentRoles);
+            roles = agentRoles;
+            logger.info({ roomId, count: agentRoles.size }, '[win-detect] Restored roles from agent keyspace');
+          }
+        }
+      }
+    } catch (err: any) {
+      logger.error({ err: err.message, roomId }, '[win-detect] agent-keyspace role fallback failed');
+    }
+  }
+
   return roles ?? new Map();
 }
 
