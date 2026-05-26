@@ -44,6 +44,7 @@ import { hasUsableChatStore } from "./llm-chat-call.js";
 import { resolveNickname } from "../services/logListener.js";
 import { HeadlessDayDriver } from "./headless-day.js";
 import { agentHeadlessDayKey } from "./redis-keys.js";
+import { AGENT_TESTNET_CHAIN_ID, sweepRoomAgentFunds } from "./sweep.js";
 
 let activeListener: AgentEventListener | null = null;
 
@@ -262,6 +263,36 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
   // Register the finalizer so nightRoutes.ts can fire-and-forget after doResolveNight.
   setHeadlessFinalizer(finalizeHeadlessWin);
 
+  const sweepAgentsAfterGame = (cid: number, roomId: string) => {
+    if (cid !== AGENT_TESTNET_CHAIN_ID) return;
+    const firstDelayMs = Number(process.env.AGENT_SWEEP_DELAY_MS ?? "60000");
+    const retryDelayMs = Number(process.env.AGENT_SWEEP_RETRY_DELAY_MS ?? "300000");
+    const run = async (label: string) => {
+      try {
+        const result = await sweepRoomAgentFunds({ chainId: cid, roomId: BigInt(roomId) });
+        logger.info(
+          {
+            chainId: cid,
+            roomId,
+            label,
+            swept: result.outcomes.filter((o) => o.status === "swept").length,
+          },
+          "[agents] post-game agent sweep complete"
+        );
+      } catch (err: any) {
+        logger.warn(
+          { chainId: cid, roomId, label, err: String(err?.message ?? err) },
+          "[agents] post-game agent sweep failed"
+        );
+      }
+    };
+
+    setTimeout(() => void run("initial"), Math.max(0, firstDelayMs));
+    if (retryDelayMs > 0) {
+      setTimeout(() => void run("retry"), Math.max(0, firstDelayMs + retryDelayMs));
+    }
+  };
+
   const nightHandler = new NightHandler({
     redis,
     chainOpsFor,
@@ -439,6 +470,7 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     preGameHandler,
     phaseTimeoutDriver,
     headlessDayDriver,
+    sweepAgents: sweepAgentsAfterGame,
   });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);

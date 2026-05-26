@@ -23,6 +23,10 @@ import type { RateLimitRequestHandler } from "express-rate-limit";
 import { logger } from "../utils/logger.js";
 import { fillRoomWithAgents } from "../agents/fill-room.js";
 import { getSponsorAddress, getSponsorBalance } from "../agents/sponsor.js";
+import {
+  AGENT_TESTNET_CHAIN_ID,
+  sweepRoomAgentFunds,
+} from "../agents/sweep.js";
 import { getRedis } from "../redis.js";
 
 /**
@@ -44,6 +48,14 @@ function authOk(req: any): boolean {
   // Express normalises headers to lowercase — the capital-case fallback was dead code.
   const provided = req.headers["x-agents-api-key"];
   return typeof provided === "string" && provided === required;
+}
+
+function validateAgentTestnet(chainId: number): string | null {
+  if (!Number.isFinite(chainId)) return "chainId not parseable as number";
+  if (chainId !== AGENT_TESTNET_CHAIN_ID) {
+    return "agent controls are testnet-only (chainId 50312)";
+  }
+  return null;
 }
 
 export function createAgentRoutes(ctx: AgentRoutesContext) {
@@ -75,6 +87,8 @@ export function createAgentRoutes(ctx: AgentRoutesContext) {
         return res.status(400).json({ error: "roomId not parseable as bigint" });
       }
       const chainId = Number(req.body?.chainId ?? 50312);
+      const chainErr = validateAgentTestnet(chainId);
+      if (chainErr) return res.status(400).json({ error: chainErr });
       const agentCount = Number(req.body?.agentCount ?? 5);
       const nicknamePrefix =
         typeof req.body?.nicknamePrefix === "string"
@@ -101,6 +115,30 @@ export function createAgentRoutes(ctx: AgentRoutesContext) {
       });
     } catch (err: any) {
       logger.error({ err: err?.message ?? err }, "[agents/fill-room] failed");
+      return res.status(500).json({ error: String(err?.message ?? err) });
+    }
+  });
+
+  router.post("/agents/sweep-room", ctx.actionLimiter, async (req, res) => {
+    try {
+      const roomIdRaw = req.body?.roomId;
+      if (roomIdRaw == null) {
+        return res.status(400).json({ error: "missing roomId" });
+      }
+      let roomId: bigint;
+      try {
+        roomId = BigInt(roomIdRaw);
+      } catch {
+        return res.status(400).json({ error: "roomId not parseable as bigint" });
+      }
+      const chainId = Number(req.body?.chainId ?? 50312);
+      const chainErr = validateAgentTestnet(chainId);
+      if (chainErr) return res.status(400).json({ error: chainErr });
+
+      const result = await sweepRoomAgentFunds({ chainId, roomId });
+      return res.json(result);
+    } catch (err: any) {
+      logger.error({ err: err?.message ?? err }, "[agents/sweep-room] failed");
       return res.status(500).json({ error: String(err?.message ?? err) });
     }
   });

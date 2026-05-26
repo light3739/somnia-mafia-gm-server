@@ -49,6 +49,8 @@ export type DispatcherDeps = {
    * day isn't a silent "Waiting for discussion..." screen. No-op for mixed games.
    */
   headlessDayDriver?: HeadlessDayDriver;
+  /** Optional: post-game cleanup for leftover native funds on agent EOAs. */
+  sweepAgents?: (chainId: number, roomId: string) => void | Promise<void>;
 };
 
 export type DispatchOutcome =
@@ -215,6 +217,15 @@ export class AgentDispatcher {
         break;
       case "GAME_ENDED":
         this.deps.phaseTimeoutDriver?.stop(`${event.chainId}:${event.roomId}`);
+        if (this.deps.sweepAgents) {
+          void Promise.resolve(this.deps.sweepAgents(event.chainId, event.roomId)).catch(
+            (err) =>
+              logger.error(
+                { err, roomId: event.roomId },
+                "[agents] sweepAgents threw"
+              )
+          );
+        }
         // TODO 4c: dispatch reveal-bundle for all agent traces in this room
         break;
     }
