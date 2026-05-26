@@ -110,3 +110,22 @@ export function getDoctorHeal(actions: NightAction[]): Address {
   const healAction = actions.find((a) => a.actionType === 'heal');
   return healAction?.targetAddress || '0x0000000000000000000000000000000000000000';
 }
+
+/**
+ * Minimum-night-duration floor. Given when the night started and a minimum
+ * duration (ms), returns how many ms remain before the night may resolve.
+ * 0 means "resolve now".
+ *
+ * Without this a night resolves the instant every role-actor has acted —
+ * agents commit in ~5s, so the NIGHT phase flashes past before a spectator
+ * can read it. Holding the resolve until the floor elapses gives the night a
+ * visible duration regardless of how fast (or few) the actors are.
+ */
+export function nightFloorRemainingMs(
+  nightStartedAt: number | undefined,
+  minMs: number,
+  now: number = Date.now(),
+): number {
+  if (!nightStartedAt || minMs <= 0) return 0;
+  return Math.max(0, minMs - (now - nightStartedAt));
+}

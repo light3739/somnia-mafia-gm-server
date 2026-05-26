@@ -10,7 +10,7 @@ import {
 import { Role } from '../types/contract.js';
 import {
   getOrCreateNightState, getNightState, clearNightState,
-  calculateMafiaConsensus, getDoctorHeal, type NightAction,
+  calculateMafiaConsensus, getDoctorHeal, nightFloorRemainingMs, type NightAction,
 } from '../game-state.js';
 import type { GMStore } from '../stores/index.js';
 import type { RedisClient } from '../redis.js';
@@ -174,6 +174,43 @@ export function ensureNightTimeout(rid: bigint, store: GMStore, redis: RedisClie
   }
 }
 
+// Minimum visible NIGHT duration. Without it a night resolves the instant every
+// role-actor has acted (agents commit in ~5s) and the phase flashes past. Read
+// lazily so tests / ops can tune via env. Set to 0 to disable the floor.
+function minNightMs(): number {
+  return Number(process.env.MIN_NIGHT_MS ?? 15_000);
+}
+
+/**
+ * Resolve the night, but never sooner than MIN_NIGHT_MS after the night began.
+ * Called from the "all role-actors have acted" branches (agent bridge + the
+ * human /night-action + /skip-night-action routes) so a fast all-agent or
+ * AFK-human night keeps a visible duration. If the floor already elapsed it
+ * resolves immediately; otherwise it (re)schedules the resolve for the time
+ * remaining, replacing the longer NIGHT_TIMEOUT fallback. Manual /resolve-night
+ * and the timeout path call doResolveNight directly (no floor).
+ */
+export function resolveNightWithFloor(rid: bigint, store: GMStore, redis: RedisClient, chainId?: number | string): Promise<void> {
+  const state = getNightState(rid);
+  const remaining = nightFloorRemainingMs(state?.nightStartedAt, minNightMs());
+  if (remaining <= 0) {
+    return doResolveNight(rid, store, redis, chainId);
+  }
+  const roomKey = store.getRoomKey(Number(chainId || 50312), String(rid));
+  // Replace any pending fallback timeout with the (shorter) floor timer.
+  clearNightTimer(roomKey);
+  nightChainIds.set(roomKey, Number(chainId));
+  const t = setTimeout(() => {
+    nightTimers.delete(roomKey);
+    doResolveNight(rid, store, redis, chainId).catch((err) => {
+      logger.error({ roomId: String(rid), err }, '[NightFloor] floor-delayed resolve failed');
+    });
+  }, remaining);
+  nightTimers.set(roomKey, t);
+  logger.info({ roomId: String(rid), remainingMs: remaining }, '[NightFloor] all acted — holding night until minimum duration');
+  return Promise.resolve();
+}
+
 export interface NightRoutesContext {
   store: GMStore;
   redis: RedisClient;
@@ -266,7 +303,7 @@ export function createNightRoutes(ctx: NightRoutesContext) {
 
       const alivePlayers = players.filter((p: any) => !!(Number(p.flags) & FLAGS.ACTIVE));
       if (allRolePlayersActed(Number(chainId), String(roomId), alivePlayers)) {
-        doResolveNight(rid, store, redis, chainId).catch(() => {});
+        resolveNightWithFloor(rid, store, redis, chainId).catch(() => {});
       } else if (!nightTimers.has(store.getRoomKey(Number(chainId), String(roomId)))) {
         // Start timeout if not already scheduled (regardless of how many actions received)
         scheduleNightTimeout(rid, store, redis, chainId);
@@ -310,7 +347,7 @@ export function createNightRoutes(ctx: NightRoutesContext) {
 
       const alivePlayers = players.filter((p: any) => !!(Number(p.flags) & FLAGS.ACTIVE));
       if (allRolePlayersActed(Number(chainId), String(roomId), alivePlayers)) {
-        doResolveNight(rid, store, redis, chainId).catch(() => {});
+        resolveNightWithFloor(rid, store, redis, chainId).catch(() => {});
       } else if (!nightTimers.has(store.getRoomKey(Number(chainId), String(roomId)))) {
         // Start timeout if not already scheduled (regardless of how many actions received)
         scheduleNightTimeout(rid, store, redis, chainId);

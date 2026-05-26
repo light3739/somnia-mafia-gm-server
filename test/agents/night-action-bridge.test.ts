@@ -7,12 +7,12 @@ vi.mock("../../src/chain.js", () => ({
 }));
 
 vi.mock("../../src/routes/nightRoutes.js", () => ({
-  doResolveNight: vi.fn(async () => undefined),
+  resolveNightWithFloor: vi.fn(async () => undefined),
   ensureNightTimeout: vi.fn(),
 }));
 
 const { getPlayers } = await import("../../src/chain.js");
-const { doResolveNight, ensureNightTimeout } = await import("../../src/routes/nightRoutes.js");
+const { resolveNightWithFloor, ensureNightTimeout } = await import("../../src/routes/nightRoutes.js");
 const { recordAgentNightAction } = await import("../../src/agents/night-action-bridge.js");
 
 import { clearNightState, getNightState } from "../../src/game-state.js";
@@ -81,7 +81,7 @@ describe("recordAgentNightAction", () => {
     const state = getNightState(BigInt(ROOM_ID));
     expect(state?.actions.get(MAFIA.toLowerCase())?.actionType).toBe("kill");
     expect(state?.actions.get(MAFIA.toLowerCase())?.targetAddress).toBe(CITIZEN);
-    expect(doResolveNight).toHaveBeenCalledTimes(1);
+    expect(resolveNightWithFloor).toHaveBeenCalledTimes(1);
     expect(ensureNightTimeout).not.toHaveBeenCalled();
   });
 

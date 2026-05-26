@@ -14,7 +14,7 @@ import { getOrCreateNightState, getNightState } from "../game-state.js";
 import { FLAGS, getPlayers } from "../chain.js";
 import { Role } from "../types/contract.js";
 import { logger } from "../utils/logger.js";
-import { doResolveNight, ensureNightTimeout } from "../routes/nightRoutes.js";
+import { resolveNightWithFloor, ensureNightTimeout } from "../routes/nightRoutes.js";
 import { appendAgentMemoryFact, makeInvestigationFact } from "./memory.js";
 import { toAgentRole } from "./role-sync.js";
 
@@ -161,7 +161,7 @@ export async function recordAgentNightAction(
     const alivePlayers = players.filter((p) => !!(Number(p.flags) & FLAGS.ACTIVE));
     if (allRolePlayersActed(roles, state, alivePlayers)) {
       resolvedTriggered = true;
-      doResolveNight(rid, store, redis, input.chainId).catch((err) => {
+      resolveNightWithFloor(rid, store, redis, input.chainId).catch((err) => {
         logger.error(
           { err, roomId: input.roomId, chainId: input.chainId },
           "[agents/night-bridge] auto-resolve failed"

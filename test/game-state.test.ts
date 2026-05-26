@@ -12,6 +12,7 @@ import {
   getNightState,
   clearNightState,
   injectNightState,
+  nightFloorRemainingMs,
   type NightAction,
   type RoomNightState,
 } from '../src/game-state.js';
@@ -202,5 +203,40 @@ describe('Night State Management', () => {
 
     expect(s2.actions.size).toBe(0);
     expect(s1.actions.size).toBe(1);
+  });
+});
+
+// ================================================================
+// MINIMUM NIGHT DURATION FLOOR
+// ================================================================
+
+describe('nightFloorRemainingMs', () => {
+  const MIN = 15_000;
+
+  it('returns full minimum when night just started', () => {
+    const start = 1_000_000;
+    expect(nightFloorRemainingMs(start, MIN, start)).toBe(MIN);
+  });
+
+  it('returns remaining time mid-floor', () => {
+    const start = 1_000_000;
+    // 5s elapsed → 10s remain
+    expect(nightFloorRemainingMs(start, MIN, start + 5_000)).toBe(10_000);
+  });
+
+  it('returns 0 once the floor has elapsed', () => {
+    const start = 1_000_000;
+    expect(nightFloorRemainingMs(start, MIN, start + MIN)).toBe(0);
+    expect(nightFloorRemainingMs(start, MIN, start + 20_000)).toBe(0);
+  });
+
+  it('returns 0 when nightStartedAt is unknown', () => {
+    expect(nightFloorRemainingMs(undefined, MIN, 1_000_000)).toBe(0);
+  });
+
+  it('returns 0 when the floor is disabled (minMs <= 0)', () => {
+    const start = 1_000_000;
+    expect(nightFloorRemainingMs(start, 0, start)).toBe(0);
+    expect(nightFloorRemainingMs(start, -5, start)).toBe(0);
   });
 });

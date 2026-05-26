@@ -5,11 +5,12 @@
  * the full HTTP stack. Verifies the resolve lock (fix A3), action
  * submission, and phase validation.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from '../helpers/createTestApp.js';
+import { GMStore } from '../../src/stores/index.js';
 import { Role, FLAGS } from '../../src/types/contract.js';
-import { clearNightState, getNightState } from '../../src/game-state.js';
+import { clearNightState, getNightState, getOrCreateNightState } from '../../src/game-state.js';
 
 // Mock chain calls
 vi.mock('../../src/chain.js', async (importOriginal) => {
@@ -42,6 +43,7 @@ vi.mock('../../src/ws/wsManager.js', () => ({
 }));
 
 const { getRoom, getPlayers, resolveNight } = await import('../../src/chain.js');
+const { resolveNightWithFloor } = await import('../../src/routes/nightRoutes.js');
 
 const CHAIN_ID = 50312;
 const ROOM_ID = '42';
@@ -244,6 +246,13 @@ describe('Night resolve lock', () => {
     (getRoom as any).mockResolvedValue({ phase: 5 });
     (getPlayers as any).mockResolvedValue(mockPlayers());
     (resolveNight as any).mockResolvedValue(undefined);
+    // Disable the minimum-night floor so the resolve fires immediately — this
+    // suite tests the consensus → resolve pipeline + lock, not the pacing floor.
+    process.env.MIN_NIGHT_MS = '0';
+  });
+
+  afterEach(() => {
+    delete process.env.MIN_NIGHT_MS;
   });
 
   it('auto-resolves when all role players have acted', async () => {
@@ -287,5 +296,66 @@ describe('Night resolve lock', () => {
       expect(state.resolved).toBe(true);
     }
     // If state is undefined, it was cleared after successful resolve — also correct
+  });
+});
+
+// ================================================================
+// MINIMUM NIGHT DURATION FLOOR
+// ================================================================
+
+describe('Night minimum duration floor', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    clearNightState(BigInt(ROOM_ID));
+    (getPlayers as any).mockResolvedValue(mockPlayers());
+    (resolveNight as any).mockResolvedValue(undefined);
+    process.env.MIN_NIGHT_MS = '15000';
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete process.env.MIN_NIGHT_MS;
+  });
+
+  it('holds the resolve until the floor elapses even when every actor is done', async () => {
+    const store = new GMStore();
+    const rid = BigInt(ROOM_ID);
+
+    // Fresh night, all actions already in (mafia kill).
+    const state = getOrCreateNightState(rid, CHAIN_ID);
+    state.nightStartedAt = Date.now();
+    state.actions.set(MAFIA_1, {
+      playerAddress: MAFIA_1 as any,
+      actionType: 'kill',
+      targetAddress: CITIZEN as any,
+      timestamp: Date.now(),
+    });
+
+    await resolveNightWithFloor(rid, store, null as any, CHAIN_ID);
+
+    // Floor not elapsed → on-chain resolve must NOT have fired yet.
+    expect(resolveNight).not.toHaveBeenCalled();
+
+    // Advance past the 15s floor → the held resolve fires.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(resolveNight).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves immediately when the floor has already elapsed', async () => {
+    const store = new GMStore();
+    const rid = BigInt(ROOM_ID);
+
+    const state = getOrCreateNightState(rid, CHAIN_ID);
+    state.nightStartedAt = Date.now() - 20_000; // night began 20s ago, floor passed
+    state.actions.set(MAFIA_1, {
+      playerAddress: MAFIA_1 as any,
+      actionType: 'kill',
+      targetAddress: CITIZEN as any,
+      timestamp: Date.now(),
+    });
+
+    await resolveNightWithFloor(rid, store, null as any, CHAIN_ID);
+    expect(resolveNight).toHaveBeenCalledTimes(1);
   });
 });
