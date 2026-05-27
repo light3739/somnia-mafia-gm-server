@@ -1,7 +1,8 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { createPublicClient, createWalletClient, http, webSocket, fallback, type Address, type Hex } from 'viem';
+import { createPublicClient, http, webSocket, fallback, type Address, type Hex } from 'viem';
+import { serializedWalletClient } from './agents/tx-serializer.js';
 import { privateKeyToAccount } from 'viem/accounts';
 import { defineChain } from 'viem';
 import { DIAMOND_ABI } from './abi.js';
@@ -69,7 +70,7 @@ interface ChainConfig {
 const chainsConfig: Record<number, ChainConfig> = {
   [avalancheFuji.id]: {
     public: createPublicClient({ chain: avalancheFuji, transport: http(avalancheFuji.rpcUrls.default.http[0]) }),
-    wallet: createWalletClient({ account: gmAccount, chain: avalancheFuji, transport: http(avalancheFuji.rpcUrls.default.http[0]) }),
+    wallet: serializedWalletClient(gmAccount, avalancheFuji, avalancheFuji.rpcUrls.default.http[0]),
     diamond: AVAX_DIAMOND
   },
   [somniaTestnet.id]: {
@@ -85,7 +86,7 @@ const chainsConfig: Record<number, ChainConfig> = {
         http(somniaTestnet.rpcUrls.default.http[0]),
       ]),
     }),
-    wallet: createWalletClient({ account: gmAccount, chain: somniaTestnet, transport: http(somniaTestnet.rpcUrls.default.http[0]) }),
+    wallet: serializedWalletClient(gmAccount, somniaTestnet, somniaTestnet.rpcUrls.default.http[0]),
     diamond: SOMNIA_DIAMOND
   },
 };
@@ -102,7 +103,7 @@ if (SOMNIA_MAINNET_DIAMOND) {
         http(somniaMainnet.rpcUrls.default.http[0]),
       ]),
     }),
-    wallet: createWalletClient({ account: gmAccount, chain: somniaMainnet, transport: http(somniaMainnet.rpcUrls.default.http[0]) }),
+    wallet: serializedWalletClient(gmAccount, somniaMainnet, somniaMainnet.rpcUrls.default.http[0]),
     diamond: SOMNIA_MAINNET_DIAMOND,
   };
   logger.info(`[chain] Somnia Mainnet (5031) configured with diamond: ${SOMNIA_MAINNET_DIAMOND}`);
