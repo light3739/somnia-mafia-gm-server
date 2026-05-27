@@ -56,6 +56,13 @@ describe("buildDayPrompt concreteness", () => {
     expect(system).toContain("gruff miner");
   });
 
+  it("system prompt bans invented player behavior and unsupported attributions", () => {
+    const { messages } = buildDayPrompt({ ...base, role: AgentRole.NONE });
+    const system = messages[0].toLowerCase();
+    expect(system).toContain("only say a player spoke");
+    expect(system).toContain("do not invent their stance or past behavior");
+  });
+
   it("role=NONE no longer forces generic observations, still forbids claiming a role", () => {
     const { messages } = buildDayPrompt({ ...base, role: AgentRole.NONE });
     const system = messages[0];
@@ -74,6 +81,68 @@ describe("buildDayPrompt concreteness", () => {
     expect(user.toLowerCase()).toContain("first to speak");
     expect(user.toLowerCase()).toContain("do not invent"); // no fabricated quotes
     expect(user).not.toContain("No previous messages yet");
+  });
+
+  it("Day 1 prompt says no night happened yet and bans last-night questions", () => {
+    const { messages } = buildDayPrompt({ ...base, role: AgentRole.NONE, dayNumber: 1 });
+    const user = messages[1].toLowerCase();
+    expect(user).toContain("no night phase has happened yet");
+    expect(user).toContain("nobody saw anything last night");
+    expect(user).toContain("do not ask what anyone saw last night");
+  });
+
+  it("later-day prompt allows only public night results, not invented night info", () => {
+    const { messages } = buildDayPrompt({ ...base, role: AgentRole.NONE, dayNumber: 2 });
+    const user = messages[1].toLowerCase();
+    expect(user).toContain("only discuss night results if they appear in public game context");
+    expect(user).toContain("never invent private night information");
+  });
+
+  it("tells agents to prioritize public recap events when present", () => {
+    const { messages } = buildDayPrompt({
+      ...base,
+      role: AgentRole.NONE,
+      dayNumber: 2,
+      publicContext: [
+        "Latest public recap:",
+        "- Previous vote: Day 1, Bob was voted out.",
+        "- Last night: Alice was killed by Mafia.",
+      ],
+    });
+    const user = messages[1];
+    expect(user).toContain("Latest public recap");
+    expect(user).toContain("Use these public facts first");
+  });
+
+  it("adds a verified player-state table with chat/no-chat facts", () => {
+    const A = ("0x" + "a".repeat(40)) as `0x${string}`;
+    const B = ("0x" + "b".repeat(40)) as `0x${string}`;
+    const C = ("0x" + "c".repeat(40)) as `0x${string}`;
+    const names: Record<string, string> = {
+      [A.toLowerCase()]: "Agent #1",
+      [B.toLowerCase()]: "haiman",
+      [C.toLowerCase()]: "Agent #2",
+    };
+    const { messages } = buildDayPrompt({
+      ...base,
+      self: A,
+      role: AgentRole.NONE,
+      alive: [A, B, C],
+      recentChat: [
+        JSON.stringify({
+          by: C,
+          text: "I think Agent #1 should explain their vote.",
+          day: 1,
+        }),
+      ],
+      nameOf: (a: string) => names[a.toLowerCase()] ?? a.slice(0, 7),
+    });
+    const user = messages[1];
+    expect(user).toContain("Verified public facts:");
+    expect(user).toContain("Player state table:");
+    expect(user).toContain("haiman: alive; chat in transcript: no messages.");
+    expect(user).toContain('Agent #2: alive; chat in transcript: 1 msg, latest "I think Agent #1 should explain their vote."');
+    expect(user).toContain("do not claim they are focused, pushing, accusing");
   });
 
   it("tells the agent which player is itself and forbids self-targeting", () => {

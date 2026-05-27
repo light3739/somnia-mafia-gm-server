@@ -44,6 +44,44 @@ describe("scrubText", () => {
     }
   });
 
+  it("BLOCKED_TEMPORAL_HALLUCINATION for first-day night references", () => {
+    for (const text of [
+      "Let's start by talking about what each of us saw last night.",
+      "What happened overnight?",
+      "I want to discuss night actions.",
+      "Что вы видели прошлой ночью?",
+    ]) {
+      const r = scrubText(text, { firstDiscussionDay: true });
+      expect(r.outcome, `expected first-day block for ${JSON.stringify(text)}`).toEqual(
+        "BLOCKED_TEMPORAL_HALLUCINATION"
+      );
+      expect(r.sanitized).toBeNull();
+      expect(r.matches.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("allows night-result discussion outside the first discussion day", () => {
+    const text = "No one died last night, so I want pressure on Bob.";
+    const r = scrubText(text, { firstDiscussionDay: false });
+    expect(r.outcome).toEqual("ALLOWED");
+    expect(r.sanitized).toEqual(text);
+  });
+
+  it("BLOCKED_UNSUPPORTED_ATTRIBUTION when the model invents focus for a silent player", () => {
+    const text = "haiman, I want to know why you're so focused on Agent #2. Let's hear from you.";
+    const r = scrubText(text, { unsupportedAttributionNames: ["haiman"] });
+    expect(r.outcome).toEqual("BLOCKED_UNSUPPORTED_ATTRIBUTION");
+    expect(r.sanitized).toBeNull();
+    expect(r.matches[0]).toContain("haiman");
+  });
+
+  it("allows neutral questions to silent players", () => {
+    const text = "haiman, what do you think about Agent #2?";
+    const r = scrubText(text, { unsupportedAttributionNames: ["haiman"] });
+    expect(r.outcome).toEqual("ALLOWED");
+    expect(r.sanitized).toEqual(text);
+  });
+
   it("ALLOWED on neutral statements (no false positives)", () => {
     const cases = [
       "Bob is acting suspicious today.",

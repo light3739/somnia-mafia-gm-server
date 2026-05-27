@@ -52,6 +52,60 @@ describe("strategic prompt context", () => {
     expect(ctx.consensusTarget).toBe(C);
   });
 
+  it("puts the latest vote and night result at the top of public context", async () => {
+    const logs = [
+      { eventType: "DayStarted", eventData: { dayNumber: 1 } },
+      { eventType: "PLAYER_VOTED", eventData: { voterAddress: A, targetAddress: B } },
+      { eventType: "PLAYER_VOTED", eventData: { voterAddress: C, targetAddress: B } },
+      { eventType: "VOTING_RESULT", eventData: { playerAddress: B } },
+      { eventType: "NIGHT_RESULT", eventData: { playerAddress: D } },
+      { eventType: "DayStarted", eventData: { dayNumber: 2 } },
+    ];
+    const redis = fakeRedis(
+      new Map([["room:logs:1:100", JSON.stringify(logs)]])
+    );
+
+    const ctx = await loadPublicGameContext(redis, {
+      chainId: 1,
+      roomId: "100",
+      currentDay: 2,
+      alive: [A, C],
+      self: A,
+      nameOf: (addr) => ({ [A]: "Alice", [B]: "Bob", [C]: "Carol", [D]: "Dave" }[addr] ?? addr),
+    });
+
+    const text = ctx.lines.join("\n");
+    expect(text).toContain("Latest public recap:");
+    expect(text).toContain("Previous vote: Day 1, Bob");
+    expect(text).toContain("was voted out");
+    expect(text).toContain("Last night: Dave");
+    expect(text).toContain("was killed by Mafia");
+  });
+
+  it("recaps peaceful nights explicitly", async () => {
+    const logs = [
+      { eventType: "DayStarted", eventData: { dayNumber: 1 } },
+      { eventType: "VOTING_RESULT", eventData: { isSafe: true } },
+      { eventType: "NIGHT_RESULT", eventData: { isSafe: true } },
+      { eventType: "DayStarted", eventData: { dayNumber: 2 } },
+    ];
+    const redis = fakeRedis(
+      new Map([["room:logs:1:101", JSON.stringify(logs)]])
+    );
+
+    const ctx = await loadPublicGameContext(redis, {
+      chainId: 1,
+      roomId: "101",
+      currentDay: 2,
+      alive: [A, B, C],
+      self: A,
+    });
+
+    const text = ctx.lines.join("\n");
+    expect(text).toContain("no one was voted out");
+    expect(text).toContain("Last night: no one died");
+  });
+
   it("lets vote fallback follow the consensus target and exposes context in the prompt", () => {
     const { prompt } = buildVotePrompt({
       self: A,

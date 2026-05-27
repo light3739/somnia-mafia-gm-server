@@ -114,7 +114,7 @@ export const AGENT_MESSAGE_TYPEHASH = keccak256(toHex("MAFIA_AGENT_MESSAGE_V2"))
 /** Bump this whenever the scrubber regex / policy changes. The boolean
  *  scrubAllowed bound into messageHash plus this version pin the exact
  *  scrubber decision to a versioned ruleset. */
-export const SCRUB_VERSION = 1;
+export const SCRUB_VERSION = 2;
 
 export const MSG_KIND_REGULAR       = keccak256(toHex("MSG"));
 export const MSG_KIND_SKIP_SCRUBBED = keccak256(toHex("SKIP_SCRUBBED"));
@@ -131,7 +131,12 @@ export type CommitStatus =
 
 export type MsgKind = "MSG" | "SKIP_SCRUBBED";
 
-export type ScrubOutcome = "ALLOWED" | "BLOCKED_ROLE_LEAK" | "EMPTY_RESPONSE";
+export type ScrubOutcome =
+  | "ALLOWED"
+  | "BLOCKED_ROLE_LEAK"
+  | "BLOCKED_TEMPORAL_HALLUCINATION"
+  | "BLOCKED_UNSUPPORTED_ATTRIBUTION"
+  | "EMPTY_RESPONSE";
 
 export function messageTextHash(text: string): Hex {
   return keccak256(

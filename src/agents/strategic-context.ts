@@ -161,6 +161,34 @@ function summarizeNightRound(round: NightRound, nameOf?: NameOf): string {
   return `Night ${round.day}: no one died.`;
 }
 
+function latestBefore<T extends { day: number }>(
+  rounds: readonly T[],
+  currentDay: number
+): T | null {
+  for (const round of [...rounds].reverse()) {
+    if (round.day < currentDay) return round;
+  }
+  return null;
+}
+
+function summarizeLatestVoteRecap(round: VoteRound, nameOf?: NameOf): string {
+  const top = tallyVotes(round.votes)
+    .slice(0, 3)
+    .map((t) => `${display(t.target, nameOf)}=${t.count}`)
+    .join(", ");
+  if (round.eliminated) {
+    return `Previous vote: Day ${round.day}, ${display(round.eliminated, nameOf)} was voted out. Vote pressure: ${top || "no recorded votes"}.`;
+  }
+  return `Previous vote: Day ${round.day}, no one was voted out. Vote pressure: ${top || "no recorded votes"}.`;
+}
+
+function summarizeLatestNightRecap(round: NightRound, nameOf?: NameOf): string {
+  if (round.killed && round.killed !== ZERO_ADDR) {
+    return `Last night: ${display(round.killed, nameOf)} was killed by Mafia.`;
+  }
+  return `Last night: no one died.`;
+}
+
 function countRecentStalls(rounds: readonly VoteRound[], currentDay: number): number {
   let count = 0;
   for (const round of [...rounds].reverse()) {
@@ -243,10 +271,17 @@ export async function loadPublicGameContext(
   const recentNights = nightRounds
     .filter((r) => r.day < args.currentDay)
     .slice(-(args.maxNightDays ?? 3));
+  const latestVote = latestBefore(voteRounds, args.currentDay);
+  const latestNight = latestBefore(nightRounds, args.currentDay);
 
   const lines = [
     `Elimination threshold today: ${required}/${args.alive.length} alive votes.`,
   ];
+  if (latestVote || latestNight) {
+    lines.push("Latest public recap:");
+    if (latestVote) lines.push(`- ${summarizeLatestVoteRecap(latestVote, args.nameOf)}`);
+    if (latestNight) lines.push(`- ${summarizeLatestNightRecap(latestNight, args.nameOf)}`);
+  }
   if (recentVotes.length > 0) {
     lines.push("Recent vote history:");
     for (const round of recentVotes) lines.push(`- ${summarizeVoteRound(round, args.nameOf)}`);
