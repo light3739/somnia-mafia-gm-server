@@ -70,7 +70,7 @@ function resolveChainIds(): number[] {
  * store address.
  */
 function assertDayConfig(chainIds: number[]): void {
-  const enabled = (process.env.AGENTS_DAY_ENABLED ?? "").toLowerCase() === "true";
+  const enabled = (process.env.AGENTS_DAY_ENABLED ?? "true").toLowerCase() !== "false";
   if (!enabled) return;
   // Per-chain: warn (do NOT crash) for chains without a usable LLM chat store.
   // A dual-chain deployment (e.g. testnet+mainnet) where only some chains have a
@@ -338,10 +338,11 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
       .catch((err) => logger.error({ err, chainId, roomId }, "[agents] confirmResolvedRoles threw"));
   });
 
-  // 4d DAY chat — opt-in via AGENTS_DAY_ENABLED. Skipped (no listener wire)
-  // when disabled so a misconfigured deployment cannot accidentally chat-spam.
+  // 4d DAY chat — ON by default; set AGENTS_DAY_ENABLED=false to opt out
+  // (no listener wire when disabled). Per-chain it still skips chains without
+  // a usable LLM chat store (see assertDayConfig / hasUsableChatStore).
   const dayEnabled =
-    (process.env.AGENTS_DAY_ENABLED ?? "").toLowerCase() === "true";
+    (process.env.AGENTS_DAY_ENABLED ?? "true").toLowerCase() !== "false";
   let dayHandler: DayHandler | undefined;
   if (dayEnabled) {
     const broadcaster: DayBroadcaster = {
