@@ -111,7 +111,7 @@ const GAS = {
   forcePhaseTimeout: 8_000_000n,
   startGame: 8_000_000n,
   commitAndConfirmRole: 8_000_000n, // last confirm advances to DAY — heavy, must not OOG
-  revealDeck: 15_000_000n, // shuffle reveal does the full deck decrypt (~14.5M) — must not OOG
+  revealDeck: 30_000_000n, // full deck decrypt; 7-player first-shuffler reveal OOG'd at 15M (replay-proven: reverts at 15M, passes at 30M)
   shareKeysToAll: 8_000_000n,
   commitDeck: 2_000_000n,
   commitInference: 2_000_000n,
