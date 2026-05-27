@@ -244,9 +244,12 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
       return r;
     },
     walletFor: (chainId: number, roomId: string, agentAddr: `0x${string}`) => {
-      // Scan derivation slots 0..maxAgents-1 to find the matching HD account.
-      // maxAgents is small (≤6) so this is fast and stateless.
-      const MAX = 6;
+      // Scan derivation slots to find the matching HD account. Agents register
+      // at idx = playersCount-at-fill + i, so a fixed window of 6 orphaned the
+      // idx-6 winner — the finalizer threw "no agent wallet derived" and the
+      // game looped forever (room 60). Scan a generous window; derivation is
+      // cheap + stateless. Mirrors agentDeriveCount's intent in voting/night/day.
+      const MAX = 24;
       for (let idx = 0; idx < MAX; idx++) {
         const w = deriveAgentWallet({ mnemonic, roomId: BigInt(roomId), idx });
         if (w.address.toLowerCase() === agentAddr.toLowerCase()) {
