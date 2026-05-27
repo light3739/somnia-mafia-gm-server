@@ -1,125 +1,99 @@
-# Mafia On Chain — Game Master Server
+# Mafia Onchain — GM Server & Agent Runtime
 
-**Part of the [Avalanche Build Games Hackathon](https://www.avax.network/) submission**
+The TypeScript backend for **Mafia Onchain**, a provably-fair social-deduction game on **Somnia**
+where autonomous LLM agents are first-class players. This service does three jobs:
 
-The Game Master (GM) server is the trusted off-chain oracle that handles the **Night Phase** of the Mafia On Chain game. It receives encrypted night actions from players, verifies them cryptographically, resolves conflicts (kill vs heal), and posts only the outcome to the smart contract on **Avalanche Fuji**.
+1. **Agent runtime** — drives autonomous LLM players: day debate, voting, and hidden night actions,
+   each produced by Somnia **on-chain inference** and committed on-chain.
+2. **Game Master (GM)** — handles setup and endgame role reveal; signs GM-only on-chain calls.
+3. **Headless driver** — when no human remains, it advances all-agent rooms to a ZK-verified finish.
 
-Frontend repo: https://github.com/light3739/SomniaMafia  
-Live demo: https://mafiaonchain.live
+- **Live demo:** https://mafiaonchain.live
+- **Contracts:** https://github.com/light3739/SomniaSol
+- **Frontend:** https://github.com/light3739/SomniaMafia
 
----
-
-## What It Does
-
-In a standard on-chain Mafia game, if every player submits their night action directly to the blockchain, all actions are publicly visible in the mempool — breaking the game's anonymity (everyone could see who the Mafia is targeting).
-
-The GM server solves this:
-
-1. Players send their night actions (kill / heal / investigate) **encrypted + signed** to the GM server off-chain
-2. The GM verifies each player's role using their on-chain `roleCommit` hash (ZK-style: `keccak256(role, salt)`)
-3. The GM resolves conflicts (if the Doctor healed the Mafia's kill target, the kill is cancelled)
-4. The GM posts **only the result** — `resolveNightAsGameMaster(roomId, killTarget, healTarget)` — to the smart contract
-
-This hides WHO performed each action. Only the outcome is on-chain.
+> Agents act from their **own EOAs** and pay their **own gas**. Every turn is a real Somnia
+> inference call: `inferChat` for day debate, `inferString` for votes, role-gated `inferToolsChat`
+> for night (a mafia agent calls `mafiaKill`, the detective `investigate`, the doctor `protect`).
+> Each result lands in ~2–4.5 s and is committed on-chain — verifiable, not server-asserted.
 
 ---
 
-## Contract Connection
+## Agent runtime (`src/agents/`)
 
-All game state lives on the **MafiaDiamond** Diamond proxy (Avalanche Fuji):
-
-- **Contract address**: `0x3c1bd1923f8318247e2b60e41b0f280391c4e1e1`
-- **Explorer**: https://testnet.snowtrace.io/address/0x3c1bd1923f8318247e2b60e41b0f280391c4e1e1\#code
-- **GM wallet** is registered on-chain via `setGameMaster(address)` — only this wallet can call `resolveNightAsGameMaster`
-
----
-
-## API
-
-**Base URL (production)**: `https://gm.mafiaonchain.live`
-
-### `GET /health`
-Returns server status, Redis connection, and chain connection.
-
-```json
-{ "ok": true, "redis": "ok", "chain": "ok" }
-```
-
-### `POST /gm/night-action`
-Submit a night action for the GM to process.
-
-**Request body:**
-```json
-{
-  "roomId": "42",
-  "playerAddress": "0xYourMainWalletAddress",
-  "actionType": "kill",
-  "targetAddress": "0xTargetPlayerAddress",
-  "signature": "0x...",
-  "signerAddress": "0xSessionKeyAddress",
-  "role": 1,
-  "salt": "randomSaltString"
-}
-```
-
-| Field | Description |
+| Phase / concern | Files |
 |---|---|
-| `actionType` | `kill` (Mafia), `heal` (Doctor), `check` (Detective) |
-| `signature` | EIP-191 signature of `night:{roomId}:{actionType}:{targetAddress}` |
-| `role` | `1` = MAFIA, `2` = DOCTOR, `3` = DETECTIVE |
-| `salt` | Salt used in `commitAndConfirmRole` — GM uses this to verify the role commit |
+| Pregame role commit (Poseidon) | `pregame.ts`, `roles.ts`, `role-resolve.ts`, `role-sync.ts` |
+| DAY debate (`inferChat`) | `day.ts`, `llm-chat-call.ts`, `chat-store.ts`, `headless-day.ts` |
+| VOTING (`inferString`) | `voting.ts`, `llm-call.ts` |
+| NIGHT (role-gated `inferToolsChat`) | `night.ts`, `llm-tools-call.ts`, `night-action-bridge.ts` |
+| Reasoning over facts | `strategic-context.ts`, `suspicion.ts`, `memory.ts`, `decision-schema.ts`, `personas.ts` |
+| Endgame finalize (`endGameZK`) | `headless-endgame.ts`, `groth16.ts`, `win-detect.ts` |
+| Funding / wallets | `sponsor.ts`, `agent-funding.ts`, `wallets.ts`, `sweep.ts`, `fill-room.ts` |
 
-**Role verification**: The GM computes `keccak256(abi.encode(role, salt))` off-chain and checks it against the player's `RoleCommitted` event on-chain. Faking a role returns `403`.
+### Reliability engineering (the hard part)
+Making autonomous on-chain agents reliable under live network conditions drove most of the work:
 
-### `POST /gm/mafia-chat`
-Post an encrypted message to the Mafia-only private channel.
-
----
-
-## How Role Verification Works
-
-```
-Player commits:  keccak256(abi.encode(role, salt))  → stored on-chain
-GM receives:     { role: 1, salt: "xyz" }
-GM verifies:     keccak256(abi.encode(1, "xyz")) == on-chain commit hash
-```
-
-No ZK circuit required server-side — the commitment scheme achieves the same binding property.
-
----
-
-## Tech Stack
-
-- **Runtime**: Node.js + TypeScript
-- **Chain client**: Viem (Avalanche Fuji)
-- **State**: Redis (room tracking, action deduplication)
-- **Auth**: EIP-191 signature verification
-- **Transport**: Express.js HTTP
+- **Poll + event race — `wait-for-result.ts`.** Somnia drops `watchContractEvent` logs on fast
+  callbacks, so every inference path (`inferChat` / `inferString` / `inferToolsChat`) races an event
+  watch against view-polling the result store. This eliminated the dropped-log failure mode for
+  votes, kills, and chat.
+- **Per-wallet nonce manager — `tx-serializer.ts`.** Serializes txs per wallet with a local nonce
+  (`max(chain, local)`), removing contention between concurrent agent wallets (Somnia's pending-nonce
+  lags, so serialize-alone was not enough).
+- **Per-tx gas caps — `chain-ops.ts`, `groth16.ts`.** Heavy finalizing txs (vote tally, deck reveal,
+  `endGameZK` ≈ 62M gas) get explicit caps so viem's estimate can't under-fund them into OOG.
+- **Anti-stall + headless drivers — `phase-timeout.ts`, `headless-day.ts`, `turnController.ts`.**
+  Agents reason over structured facts (quorum, tallies, night outcomes, own history) and converge a
+  headless game in a few rounds; an alive agent forces phase progression when no live human is present.
+- **Provably-fair endgame — `headless-endgame.ts`.** All-agent games used to end only via a
+  last-player-standing timeout (no verified result). They now finalize through `endGameZK`, signed by
+  the winning faction's agent EOA, with on-chain role reveal.
 
 ---
 
-## Running Locally
+## API (`src/routes/`)
+
+Express HTTP + WebSocket. Route groups: `roomRoutes`, `sessionRoutes`, `agentRoutes`,
+`discussionRoutes` (day chat), `nightRoutes`, `eciesRoutes` (encrypted role keys), `winRoutes`,
+`avatarRoutes`, `logRoutes`. Plus `GET /health` → `{ ok, redis, chain }`.
+
+`POST /agents/fill-room` tops up + joins + registers agents into a room (sponsor-funded), which
+unblocks all-agent / mixed games.
+
+---
+
+## Run locally
+
+Node + TypeScript. State in Redis (Memurai works on Windows). Tests via Vitest.
 
 ```bash
 npm install
-cp .env.example .env
-# Fill in: PRIVATE_KEY, REDIS_URL, CONTRACT_ADDRESS
-npm run dev
+cp .env.example .env       # fill the values below
+npm run dev                # tsx watch src/index.ts
+npm test                   # vitest run
+npm run build && npm start # tsc → node dist/index.js
 ```
 
-### Environment Variables
-
+### Key environment variables
 ```bash
-PRIVATE_KEY=0x...              # GM wallet private key (registered on-chain)
-REDIS_URL=redis://localhost:6379
-CONTRACT_ADDRESS=0x3c1bd1923f8318247e2b60e41b0f280391c4e1e1
-RPC_URL=https://api.avax-test.network/ext/bc/C/rpc
+GM_PRIVATE_KEY=                 # GM wallet; registered on-chain via setGameMaster(). Never commit.
 PORT=3001
+SOMNIA_RPC_URL=https://dream-rpc.somnia.network/
+SOMNIA_DIAMOND=0x031b6746155ce11c7b533935f4674f5fc4682338
+
+# Agent subsystem
+AGENTS_ENABLED=true
+AGENTS_CHAIN_IDS=50312
+AGENT_MASTER_MNEMONIC=          # HD wallet root for agent EOAs. Never commit.
+AGENT_SPONSOR_PRIVATE_KEY=      # funds agent gas. Never commit.
+SPONSOR_LOW_THRESHOLD_STT=...   # skip an agent if sponsor balance falls below this
+
+# DAY chat (off by default) + inferChat result sinks (one per chainId)
+AGENTS_DAY_ENABLED=false
+LLM_CHAT_STORE_50312=0x...
+LLM_CHAT_WAIT_MS=60000          # DAY-only timeout CAP (returns early on success); not for VOTING
 ```
 
----
-
-The GM server is deployed as a Docker container authenticated via GHCR.
-The CI/CD pipeline is fully automated via GitHub Actions:
-1. Build & Push to GHCR
-2. Pull and restart on remote server
+Stack: Node.js · TypeScript · Express · `viem` · Redis (`ioredis`) · `ws` · `snarkjs` +
+`circomlibjs` (ZK) · `pino`. Deployed as a Docker container via GHCR + GitHub Actions.
