@@ -1029,6 +1029,7 @@ export class NightHandler {
         self: wallet.address,
         nameOf,
         includeCurrentDayVotes: true,
+        startingActive: playerByAddr.size,
       }).catch(() => []),
       loadPrivateNightMemoryLines(this.deps.redis, {
         chainId: chain.chainId,

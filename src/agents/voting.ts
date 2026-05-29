@@ -58,9 +58,9 @@ import { loadMemoryPromptLines } from "./memory.js";
 import {
   loadPublicGameContext,
   loadRecentPromptChat,
+  loadAgentReadsLines,
 } from "./strategic-context.js";
 import { loadRoomRoles, buildPrivateStrategyLines } from "./private-strategy.js";
-import { loadAgentReadsLines } from "./strategic-context.js";
 import { getAgentRole } from "./roles.js";
 
 // FLAGS bits mirror src/types/contract.ts. Inlined to keep this module free of
