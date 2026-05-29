@@ -7,6 +7,7 @@ import type { Address, Hex, HDAccount, PublicClient, WalletClient } from "viem";
 
 import {
   DayHandler,
+  buildDayPrompt,
   type DayChainOps,
   type DayStartedEvent,
   type DayBroadcaster,
@@ -860,5 +861,30 @@ describe("DayHandler.speakAgentTurn", () => {
     expect(chain.sendCommitCalls).toHaveLength(0);
     expect(ws.calls).toHaveLength(0);
     expect(chain.roomCalls).toBe(0); // gate returns before any chain read
+  });
+});
+
+describe("buildDayPrompt situational additions", () => {
+  const base = {
+    self: "0x1111111111111111111111111111111111111111" as const,
+    role: AgentRole.CITIZEN,
+    persona: "loud sceptical accuser",
+    alive: ["0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"] as any,
+    recentChat: [] as string[],
+    dayNumber: 2,
+    language: "English",
+  };
+
+  it("emits a death-reaction opener when a night victim is given", () => {
+    const { messages } = buildDayPrompt({ ...base, sinceLastRound: { nightDeathName: "Bob" } });
+    expect(messages.join("\n")).toContain("Bob was killed last night");
+  });
+  it("emits a peaceful-night opener when the night was safe", () => {
+    const { messages } = buildDayPrompt({ ...base, sinceLastRound: { peacefulNight: true } });
+    expect(messages.join("\n")).toContain("nobody died last night");
+  });
+  it("no death opener on day 1", () => {
+    const { messages } = buildDayPrompt({ ...base, dayNumber: 1, sinceLastRound: { nightDeathName: "Bob" } });
+    expect(messages.join("\n")).not.toContain("was killed last night");
   });
 });

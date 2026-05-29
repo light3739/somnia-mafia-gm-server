@@ -66,7 +66,8 @@ import {
   type InferChatResult,
 } from "./llm-chat-call.js";
 import { loadMemoryPromptLines } from "./memory.js";
-import { loadPublicGameContextLines } from "./strategic-context.js";
+import { loadPublicGameContext, loadAgentReadsLines } from "./strategic-context.js";
+import { loadRoomRoles, buildPrivateStrategyLines } from "./private-strategy.js";
 
 const PHASE_DAY = 3; // GamePhase.DAY (was 2/REVEAL — bug: handler skipped every real DAY)
 const FLAG_ACTIVE = 0x2;
@@ -186,6 +187,8 @@ export interface DayPromptArgs {
   language: string;
   /** Map an address to a display name for the prompt. Defaults to a short address. */
   nameOf?: (addr: string) => string;
+  /** Behavioral opener material derived from the last round (C3). */
+  sinceLastRound?: { nightDeathName?: string; peacefulNight?: boolean; voteOutName?: string };
 }
 
 function formatChatLine(
@@ -368,11 +371,30 @@ export function buildDayPrompt(args: DayPromptArgs): {
     args.dayNumber <= 1
       ? `This is the first discussion day. No NIGHT phase has happened yet, so nobody saw anything last night and there are no night results or night actions to discuss. Do NOT ask what anyone saw last night, do NOT mention "last night", and base your read only on current conversation, voting pressure, tone, contradictions, and behavior.`
       : `Only discuss night results if they appear in Public game context. Never invent private night information or ask players to reveal role-specific night actions.`;
+  const sr = args.sinceLastRound ?? {};
+  const deathOpener =
+    args.dayNumber > 1 && sr.nightDeathName
+      ? `PRIORITY: ${sr.nightDeathName} was killed last night. Open by reacting to it — who benefits, who pushed or defended ${sr.nightDeathName}, does this kill clear or implicate anyone? Don't ignore the body.`
+      : args.dayNumber > 1 && sr.peacefulNight
+      ? `PRIORITY: nobody died last night — a save, a missed kill, or a no-op. Who might have been protected (a Doctor read), and who did the Mafia likely aim at?`
+      : ``;
+  const voteOpener =
+    args.dayNumber > 1 && sr.voteOutName
+      ? `Last round the town voted out ${sr.voteOutName}. If last night's outcome suggests that was a mistake, say so.`
+      : ``;
+  const stance = /loud|bold|accus|paranoid|impatient/i.test(args.persona)
+    ? `Take the lead: name a concrete suspect and push.`
+    : /quiet|calm|cautious|soft|observer|mediator/i.test(args.persona)
+    ? `Probe before committing: ask a pointed question or weigh two suspects.`
+    : `State a clear read.`;
   const user = [
     `Day ${args.dayNumber}. Players still alive: ${args.alive
       .map((a) => (a.toLowerCase() === args.self.toLowerCase() ? `${nameOf(a)} (you)` : nameOf(a)))
       .join(", ")}.`,
     firstDayRule,
+    deathOpener,
+    voteOpener,
+    stance,
     verifiedFacts,
     publicContext.length === 0
       ? ``
@@ -468,6 +490,9 @@ export class DayHandler {
     const phaseIdHex = makePhaseId("DAY", event.dayNumber);
     const outcomes: AgentDayOutcome[] = [];
 
+    const roomRoles = await loadRoomRoles(this.deps.redis, event.chainId, event.roomId).catch(() => new Map());
+    const totalPlayers = players.length;
+
     for (const wallet of order) {
       // Pre-inference phase check (each iteration).
       const recheck = await chain.getRoom(roomIdBig).catch(() => null);
@@ -483,6 +508,8 @@ export class DayHandler {
         phaseIdHex,
         aliveAddrs,
         nameByAddr,
+        roomRoles,
+        totalPlayers,
       }).catch((err): AgentDayOutcome => {
         log.error({ err, agent: wallet.address }, "[agents/day] handleOneAgent threw");
         return {
@@ -560,7 +587,10 @@ export class DayHandler {
       logIndex: 0,
     };
 
-    await this.handleOneAgent({ chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs, nameByAddr }).catch(
+    const roomRoles = await loadRoomRoles(this.deps.redis, args.chainId, args.roomId).catch(() => new Map());
+    const totalPlayers = players.length;
+
+    await this.handleOneAgent({ chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs, nameByAddr, roomRoles, totalPlayers }).catch(
       () => undefined
     );
     return { handled: true };
@@ -575,6 +605,8 @@ export class DayHandler {
     aliveAddrs: Address[];
     /** address(lowercase) → on-chain nickname, for reliable prompt names. */
     nameByAddr: Map<string, string>;
+    roomRoles: Map<string, AgentRole>;
+    totalPlayers: number;
   }): Promise<AgentDayOutcome> {
     const { chain, wallet, roomIdBig, event, phaseIdHex, aliveAddrs, nameByAddr } = args;
     const log = logger.child({
@@ -685,20 +717,31 @@ export class DayHandler {
         a.toLowerCase().slice(0, 7)
       );
     };
-    const publicContext = await loadPublicGameContextLines(this.deps.redis, {
+    const ctx = await loadPublicGameContext(this.deps.redis, {
       chainId: chain.chainId,
       roomId: event.roomId,
       currentDay: event.dayNumber,
       alive: aliveAddrs,
       self: wallet.address,
       nameOf,
-    }).catch(() => []);
+      startingActive: args.totalPlayers,
+    }).catch(() => null);
+    const publicContext = ctx?.lines ?? [];
+    const sinceLastRound = {
+      nightDeathName: ctx?.latestNightDeath ? nameOf(ctx.latestNightDeath) : undefined,
+      peacefulNight: !!ctx?.latestNightHappened && !ctx?.latestNightDeath,
+      voteOutName: ctx?.latestVoteOut ? nameOf(ctx.latestVoteOut) : undefined,
+    };
     const noEvidenceNames = unsupportedAttributionNames({
       alive: aliveAddrs,
       self: wallet.address,
       recentChat,
       nameOf,
     });
+
+    const stratLines = buildPrivateStrategyLines({ role, roles: args.roomRoles, alive: aliveAddrs, self: wallet.address, nameOf, forNight: false });
+    const readsLines = await loadAgentReadsLines(this.deps.redis, { chainId: chain.chainId, roomId: event.roomId, self: wallet.address, nameOf }).catch(() => []);
+    const privateMemoryFull = [...privateMemory, ...stratLines, ...readsLines];
 
     // 5. Persist PENDING_INFERENCE.
     await this.persistTrace(chain.chainId, event, wallet.address, {
@@ -715,11 +758,12 @@ export class DayHandler {
       persona,
       alive: aliveAddrs,
       recentChat,
-      privateMemory,
+      privateMemory: privateMemoryFull,
       publicContext,
       dayNumber: event.dayNumber,
       language: this.language,
       nameOf,
+      sinceLastRound,
     });
     const walletClient = chain.buildAgentWalletClient(wallet.account);
 
