@@ -789,6 +789,19 @@ describe("computeVoteActionHash", () => {
   });
 });
 
+import { buildVotePrompt } from "../../src/agents/decision-schema.js";
+
+describe("buildVotePrompt urgency", () => {
+  it("system text tells the agent to consolidate under loss-pressure", () => {
+    const { system } = buildVotePrompt({
+      self: "0x1111111111111111111111111111111111111111" as any,
+      alive: ["0x1111111111111111111111111111111111111111", "0x2222222222222222222222222222222222222222"] as any,
+      publicChat: [], dayCount: 2,
+    });
+    expect(system).toContain("consolidate");
+  });
+});
+
 describe("VotingHandler — agent auto-topup gate", () => {
   it("funds before inference when ensureFunded provided, then votes", async () => {
     const [agentAddr, otherAddr] = deriveAgentAddresses(2);

@@ -59,6 +59,9 @@ import {
   loadPublicGameContext,
   loadRecentPromptChat,
 } from "./strategic-context.js";
+import { loadRoomRoles, buildPrivateStrategyLines } from "./private-strategy.js";
+import { loadAgentReadsLines } from "./strategic-context.js";
+import { getAgentRole } from "./roles.js";
 
 // FLAGS bits mirror src/types/contract.ts. Inlined to keep this module free of
 // cross-imports that might pull in heavy ABI dependencies under test.
@@ -302,6 +305,9 @@ export class VotingHandler {
       `[agents/voting] dispatching ${myAgents.length} agent vote(s)`
     );
 
+    const roomRoles = await loadRoomRoles(this.deps.redis, event.chainId, event.roomId).catch(() => new Map());
+    const totalPlayers = players.length;
+
     const playersByAddr = new Map(
       players.map((p) => [p.wallet.toLowerCase(), p] as const)
     );
@@ -327,6 +333,8 @@ export class VotingHandler {
             allAlive: aliveAddrs,
             playerByAddr: playersByAddr,
             headless,
+            roomRoles,
+            totalPlayers,
           });
         })().catch((err) => {
           log.error(
@@ -358,8 +366,10 @@ export class VotingHandler {
     allAlive: Address[];
     playerByAddr: Map<string, PlayerSnapshot>;
     headless: boolean;
+    roomRoles: Map<string, import("./roles.js").AgentRole>;
+    totalPlayers: number;
   }): Promise<AgentVoteOutcome> {
-    const { chain, wallet, roomIdBig, event, dayCount, allAlive, playerByAddr, headless } =
+    const { chain, wallet, roomIdBig, event, dayCount, allAlive, playerByAddr, headless, roomRoles, totalPlayers } =
       args;
     const log = logger.child({
       mod: "agents/voting",
@@ -472,13 +482,19 @@ export class VotingHandler {
       alive: allAlive,
       self: wallet.address,
       nameOf,
+      startingActive: totalPlayers,
     }).catch(() => ({ lines: [], consensusTarget: null, stalledVoteRounds: 0 }));
+
+    const role = await getAgentRole(this.deps.redis, chain.chainId, event.roomId, wallet.address);
+    const stratLines = buildPrivateStrategyLines({ role, roles: roomRoles, alive: allAlive, self: wallet.address, nameOf });
+    const readsLines = await loadAgentReadsLines(this.deps.redis, { chainId: chain.chainId, roomId: event.roomId, self: wallet.address, nameOf }).catch(() => []);
+    const privateMemoryFull = [...privateMemory, ...stratLines, ...readsLines];
 
     const { prompt, system, allowedValues } = buildVotePrompt({
       self: wallet.address,
       alive: allAlive,
       publicChat: chatHistory,
-      privateMemory,
+      privateMemory: privateMemoryFull,
       publicContext: gameContext.lines,
       dayCount,
       language: this.language,
