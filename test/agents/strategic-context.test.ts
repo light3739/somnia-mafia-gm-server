@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { loadPublicGameContext } from "../../src/agents/strategic-context.js";
+import { loadPublicGameContext, loadAgentReadsLines } from "../../src/agents/strategic-context.js";
 import type { Address } from "viem";
 
 class FakeRedis {
@@ -54,5 +54,17 @@ describe("loadPublicGameContext census + deaths", () => {
     });
     expect(ctx.latestNightHappened).toBe(true);
     expect(ctx.latestNightDeath).toBeNull();
+  });
+});
+
+describe("loadAgentReadsLines", () => {
+  it("derives reads from room:logs vote rounds", async () => {
+    const r = new FakeRedis();
+    r.store.set(`room:logs:${CHAIN}:${ROOM}`, JSON.stringify([
+      { eventType: "DayStarted", eventData: { dayNumber: 1 } },
+      { eventType: "PLAYER_VOTED", eventData: { voterAddress: B, targetAddress: A } },
+    ]));
+    const lines = await loadAgentReadsLines(r as any, { chainId: CHAIN, roomId: ROOM, self: A });
+    expect(lines.join("\n")).toContain("voted against you on Day 1");
   });
 });

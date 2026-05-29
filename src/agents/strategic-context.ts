@@ -3,6 +3,7 @@ import { getAddress, type Address } from "viem";
 import { agentChatPromptKey, agentTraceKey } from "./redis-keys.js";
 import { AgentRole } from "./roles.js";
 import { censusLines, townWinLines, roleCensus } from "./game-math.js";
+import { deriveReads, type ReadsRound } from "./reads.js";
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Address;
 
@@ -427,4 +428,14 @@ export async function loadPrivateNightMemoryLines(
   }
 
   return lines;
+}
+
+export async function loadAgentReadsLines(
+  redis: Pick<Redis, "get">,
+  args: { chainId: number; roomId: string; self: Address; nameOf?: NameOf }
+): Promise<string[]> {
+  const logs = parseLogs(await redis.get(roomLogsKey(args.chainId, args.roomId)));
+  const rounds: ReadsRound[] = parseVoteRounds(logs).map((r) => ({ day: r.day, votes: r.votes }));
+  const nameOf = args.nameOf ?? ((a: string) => a.toLowerCase().slice(0, 7));
+  return deriveReads(rounds, args.self, nameOf);
 }
