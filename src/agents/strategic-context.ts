@@ -2,6 +2,7 @@ import type { Redis } from "ioredis";
 import { getAddress, type Address } from "viem";
 import { agentChatPromptKey, agentTraceKey } from "./redis-keys.js";
 import { AgentRole } from "./roles.js";
+import { censusLines, townWinLines, roleCensus } from "./game-math.js";
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000" as Address;
 
@@ -29,6 +30,9 @@ export type PublicGameContext = {
   lines: string[];
   consensusTarget: Address | null;
   stalledVoteRounds: number;
+  latestNightDeath: Address | null;
+  latestNightHappened: boolean;
+  latestVoteOut: Address | null;
 };
 
 function roomLogsKey(chainId: number, roomId: string): string {
@@ -250,6 +254,7 @@ export async function loadPublicGameContext(
     maxVoteDays?: number;
     maxNightDays?: number;
     includeCurrentDayVotes?: boolean;
+    startingActive?: number;
   }
 ): Promise<PublicGameContext> {
   const logs = parseLogs(await redis.get(roomLogsKey(args.chainId, args.roomId)));
@@ -274,7 +279,16 @@ export async function loadPublicGameContext(
   const latestVote = latestBefore(voteRounds, args.currentDay);
   const latestNight = latestBefore(nightRounds, args.currentDay);
 
+  const prefix: string[] = [];
+  if (args.startingActive && args.startingActive > 0) {
+    prefix.push(
+      ...censusLines(args.startingActive, args.alive.length),
+      ...townWinLines({ aliveNow: args.alive.length, startingMafia: roleCensus(args.startingActive).mafia })
+    );
+  }
+
   const lines = [
+    ...prefix,
     `Elimination threshold today: ${required}/${args.alive.length} alive votes.`,
   ];
   if (latestVote || latestNight) {
@@ -305,6 +319,9 @@ export async function loadPublicGameContext(
     lines,
     consensusTarget,
     stalledVoteRounds: stalled,
+    latestNightDeath: latestNight && latestNight.killed && latestNight.killed !== ZERO_ADDR ? latestNight.killed : null,
+    latestNightHappened: !!latestNight,
+    latestVoteOut: latestVote?.eliminated ?? null,
   };
 }
 
