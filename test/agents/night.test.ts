@@ -721,3 +721,34 @@ describe("NightHandler", () => {
     expect(chain.sendCommitInference).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("night mafia teammate handling", () => {
+  const MAFIA: Address = "0xaaaa000000000000000000000000000000000001";
+  const MATE: Address = "0xbbbb000000000000000000000000000000000002";
+  const TOWN1: Address = "0xcccc000000000000000000000000000000000003";
+  const TOWN2: Address = "0xdddd000000000000000000000000000000000004";
+
+  it("buildNightPrompt lists teammates and forbids targeting them", () => {
+    const { messages } = buildNightPrompt({
+      self: MAFIA, role: AgentRole.MAFIA, alive: [MAFIA, MATE, TOWN1, TOWN2],
+      dayCount: 2, language: "English", teammates: [MATE],
+      nameOf: (a) => (a.toLowerCase() === MATE.toLowerCase() ? "Alice" : a.slice(0, 6)),
+    });
+    const joined = messages.join("\n");
+    expect(joined).toContain("Alice");
+    expect(joined.toLowerCase()).toContain("never target");
+  });
+
+  it("decodeNightToolCall re-routes a kill that targets a teammate", () => {
+    const calldata = (toFunctionSelector("mafiaKill(address)") +
+      encodeAbiParameters(parseAbiParameters("address"), [MATE]).slice(2)) as Hex;
+    const decision = decodeNightToolCall(calldata, AgentRole.MAFIA, MAFIA, [MAFIA, MATE, TOWN1, TOWN2], { teammates: [MATE] });
+    expect(decision.target.toLowerCase()).not.toBe(MATE.toLowerCase());
+    expect(decision.kind).toBe("KILL");
+  });
+
+  it("decodeNightToolCall fallback never picks a teammate", () => {
+    const decision = decodeNightToolCall("0x", AgentRole.MAFIA, MAFIA, [MAFIA, MATE, TOWN1], { teammates: [MATE] });
+    expect([TOWN1.toLowerCase()]).toContain(decision.target.toLowerCase());
+  });
+});
