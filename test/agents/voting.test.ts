@@ -855,3 +855,77 @@ describe("VotingHandler — agent auto-topup gate", () => {
     expect(chain.sendVote).not.toHaveBeenCalled();
   });
 });
+
+describe("buildVotePrompt chat↔vote parity (2026-05-30)", () => {
+  const A = "0x1111111111111111111111111111111111111111" as `0x${string}`;
+  const B = "0x2222222222222222222222222222222222222222" as `0x${string}`;
+  const C = "0x3333333333333333333333333333333333333333" as `0x${string}`;
+  const names: Record<string, string> = {
+    [A.toLowerCase()]: "Alice",
+    [B.toLowerCase()]: "Bob",
+    [C.toLowerCase()]: "Carol",
+  };
+  const nameOf = (a: string) => names[a.toLowerCase()] ?? a.slice(0, 7);
+
+  it("renders ballot options as 'Name (0xshort…)' but keeps allowedValues address-only", () => {
+    const { prompt, allowedValues } = buildVotePrompt({
+      self: A as any,
+      alive: [A, B, C] as any,
+      publicChat: [],
+      dayCount: 2,
+      nameOf,
+    } as any);
+    expect(prompt).toContain("Bob");
+    expect(prompt).toContain("Carol");
+    expect(prompt).toMatch(/Bob\s*\(0x2222/); // name mapped to its FULL address so talk→ballot connects
+    expect(prompt).toContain(B); // full address present so the model can emit it
+    expect(allowedValues).toEqual([B, C]); // addresses only, self excluded, contract unchanged
+  });
+
+  it("renders recent public chat with nicknames, not raw address prefixes", () => {
+    const { prompt } = buildVotePrompt({
+      self: A as any,
+      alive: [A, B, C] as any,
+      publicChat: [{ from: B as any, text: "I suspect Carol" }],
+      dayCount: 2,
+      nameOf,
+    } as any);
+    expect(prompt).toContain("Bob: I suspect Carol"); // chat speaker shown by nickname
+  });
+
+  it("surfaces the agent's OWN statements today and directs voting its voiced read", () => {
+    const { prompt, system } = buildVotePrompt({
+      self: A as any,
+      alive: [A, B, C] as any,
+      publicChat: [
+        { from: A as any, text: "Carol looks like mafia" },
+        { from: B as any, text: "no, it's Alice" },
+      ],
+      dayCount: 2,
+      nameOf,
+    } as any);
+    expect(prompt).toMatch(/argued today[\s\S]*Carol looks like mafia/i);
+    expect(system.toLowerCase()).toMatch(/voiced|argued|your read|stated/);
+  });
+
+  it("omits the 'argued today' block when the agent has not spoken", () => {
+    const { prompt } = buildVotePrompt({
+      self: A as any,
+      alive: [A, B, C] as any,
+      publicChat: [{ from: B as any, text: "Alice is quiet" }],
+      dayCount: 2,
+      nameOf,
+    } as any);
+    expect(prompt.toLowerCase()).not.toContain("argued today");
+  });
+
+  it("without nameOf keeps the address contract intact (back-compat)", () => {
+    const { allowedValues } = buildVotePrompt({
+      self: A as any,
+      alive: [A, B] as any,
+      publicChat: [],
+      dayCount: 2,
+    });
+    expect(allowedValues).toEqual([B]);
+  });
+});

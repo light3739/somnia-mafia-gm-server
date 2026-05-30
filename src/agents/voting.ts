@@ -498,6 +498,9 @@ export class VotingHandler {
       publicContext: gameContext.lines,
       dayCount,
       language: this.language,
+      // Same nickname source the DAY chat uses, so the ballot speaks the
+      // discussion's language (closes the chat↔vote name↔address split).
+      nameOf,
     });
 
     // The agent EOA itself drives the inferString tx — that wallet pays the

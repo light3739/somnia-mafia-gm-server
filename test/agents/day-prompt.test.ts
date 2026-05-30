@@ -219,3 +219,57 @@ describe("buildDayPrompt concreteness", () => {
     expect(messages[0]).toContain("Refer to other players by their name");
   });
 });
+
+describe("buildDayPrompt adherence restructure (2026-05-30)", () => {
+  const A = ("0x" + "a".repeat(40)) as `0x${string}`;
+  const B = ("0x" + "b".repeat(40)) as `0x${string}`;
+  const names: Record<string, string> = { [A.toLowerCase()]: "Alice", [B.toLowerCase()]: "Bob" };
+  const nameOf = (a: string) => names[a.toLowerCase()] ?? a.slice(0, 7);
+  const base = {
+    self: A,
+    role: AgentRole.NONE,
+    persona: "gruff miner",
+    alive: [A, B] as `0x${string}`[],
+    recentChat: [] as string[],
+    language: "English",
+    nameOf,
+  };
+
+  it("hoists the death-reaction opener to the FIRST user line on day>1", () => {
+    const { messages } = buildDayPrompt({
+      ...base,
+      dayNumber: 2,
+      sinceLastRound: { nightDeathName: "Bob" },
+    });
+    const firstLine = messages[1].split("\n").filter(Boolean)[0];
+    expect(firstLine).toContain("Bob");
+    expect(firstLine.toLowerCase()).toMatch(/killed last night|ignore the body|react/);
+  });
+
+  it("does not lead with the death opener on day 1 (no night yet)", () => {
+    const { messages } = buildDayPrompt({ ...base, dayNumber: 1 });
+    const firstLine = messages[1].split("\n").filter(Boolean)[0];
+    expect(firstLine.toLowerCase()).not.toContain("killed last night");
+  });
+
+  it("bans claiming anyone dodged/deflected/avoided a question (turn-based, no Q&A)", () => {
+    const { messages } = buildDayPrompt({ ...base, dayNumber: 2 });
+    const system = messages[0].toLowerCase();
+    expect(system).toMatch(/turn-based|nobody asked|no one asked|no questions/);
+    expect(system).toMatch(/dodge|deflect|evad|avoid/);
+  });
+
+  it("tells the agent not to repeat a prior point (anti-parroting)", () => {
+    const { messages } = buildDayPrompt({ ...base, dayNumber: 2 });
+    const text = messages.join("\n").toLowerCase();
+    expect(text).toMatch(/do not repeat|don't repeat|add a new|new observation/);
+  });
+
+  it("ends the user message with a self-reference guard that names the agent", () => {
+    const { messages } = buildDayPrompt({ ...base, dayNumber: 2 });
+    const lines = messages[1].split("\n").filter(Boolean);
+    const lastLine = lines[lines.length - 1];
+    expect(lastLine).toContain("Alice");
+    expect(lastLine.toLowerCase()).toMatch(/do not mention|only.*other players|yourself|third person/);
+  });
+});
