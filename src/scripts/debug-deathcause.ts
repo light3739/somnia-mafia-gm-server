@@ -24,9 +24,9 @@ const rows = logs
     let name = "?";
     let room = "";
     try {
-      const d = decodeEventLog({ abi: DIAMOND_ABI as any, topics: l.topics, data: l.data });
+      const d: any = decodeEventLog({ abi: DIAMOND_ABI as any, topics: l.topics, data: l.data });
       name = d.eventName as string;
-      room = (d.args as any)?.roomId?.toString?.() ?? "";
+      room = d.args?.roomId?.toString?.() ?? "";
     } catch {
       /* non-diamond-abi log */
     }
