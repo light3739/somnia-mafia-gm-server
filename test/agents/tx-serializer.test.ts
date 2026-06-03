@@ -1,5 +1,24 @@
-import { describe, it, expect } from "vitest";
-import { runExclusive } from "../../src/agents/tx-serializer.js";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { privateKeyToAccount } from "viem/accounts";
+import type { Chain } from "viem";
+import {
+  runExclusive,
+  pickNonce,
+  serializedWalletClient,
+} from "../../src/agents/tx-serializer.js";
+
+const FAKE_CHAIN = {
+  id: 5031,
+  name: "test",
+  nativeCurrency: { name: "SOMI", symbol: "SOMI", decimals: 18 },
+  rpcUrls: { default: { http: ["http://localhost:1"] } },
+} as unknown as Chain;
+
+// Unique account per test so the module-level localNonce/lastBroadcastAt maps
+// don't leak state between cases.
+let keySeed = 1;
+const freshAccount = () =>
+  privateKeyToAccount(("0x" + String(keySeed++).padStart(64, "0")) as `0x${string}`);
 
 const slow = (events: string[], id: string, ms: number) => async () => {
   events.push(`${id}:start`);
@@ -43,5 +62,59 @@ describe("runExclusive", () => {
       runExclusive("0xabcd", slow(ev, "2", 5)),
     ]);
     expect(ev).toEqual(["1:start", "1:end", "2:start", "2:end"]);
+  });
+});
+
+describe("pickNonce", () => {
+  const LAG = 3000;
+
+  it("within the lag window keeps the local high-water so a burst doesn't collide", () => {
+    // Somnia's pending count lags a just-broadcast tx: chain still says 111 but
+    // we already reserved 111 locally → the next burst tx must take 112, not 111.
+    expect(pickNonce(111, 112, 50, LAG)).toBe(112);
+  });
+
+  it("heals a stuck-high local nonce after a dropped tx (the room-66 freeze)", () => {
+    // A prior tx was broadcast (local advanced to 117) then silently evicted by
+    // the node, so chain's next-expected is still 111. Outside the lag window
+    // the local value is stale → must fall back to chain so the gap heals.
+    expect(pickNonce(111, 117, 5000, LAG)).toBe(111);
+  });
+
+  it("always respects external upward drift (never reuses a live nonce)", () => {
+    expect(pickNonce(120, 111, 50, LAG)).toBe(120); // recent branch
+    expect(pickNonce(120, 111, 5000, LAG)).toBe(120); // stale branch
+  });
+});
+
+describe("serializedWalletClient — nonce recovery (room-66 end-to-end)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("falls back to chain after a silently-dropped tx instead of climbing forever", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+
+    const account = freshAccount();
+    let chainPending = 111; // node's next-expected; every tx below is dropped, so it never advances
+    const sent: number[] = [];
+
+    const wallet = serializedWalletClient(account, FAKE_CHAIN, "http://localhost:1", {
+      getPendingNonce: async () => chainPending,
+      rawWrite: async (args) => {
+        sent.push(args.nonce as number);
+        return ("0x" + "f".repeat(64)) as `0x${string}`; // "accepted" — then silently evicted
+      },
+    });
+
+    // 1st GM resolve: cold → chain nonce 111. Node accepts then drops it (chainPending stays 111).
+    await (wallet.writeContract as any)({});
+    // 2nd, in the same instant (within the lag window): local high-water guards the burst → 112.
+    await (wallet.writeContract as any)({});
+    // GM retries ~130s later (well past the 3s lag window).
+    vi.setSystemTime(130_000);
+    await (wallet.writeContract as any)({});
+
+    // The retry must REUSE the freed chain nonce 111, not climb to 113 (the freeze).
+    expect(sent).toEqual([111, 112, 111]);
   });
 });
