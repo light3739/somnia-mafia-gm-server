@@ -170,6 +170,11 @@ export function agentHeadlessDayKey(
   return `${NS}:headlessday:${chainId}:${roomId}:${dayCount}`;
 }
 
+/** Once-per-(chain,room) claim so the post-game reveal driver runs a room exactly once. */
+export function agentRevealDoneKey(chainId: number, roomId: string): string {
+  return `${NS}:revealdone:${chainId}:${roomId}`;
+}
+
 /** Minimal factual memory for private agent facts (detective result, later audits). */
 export function agentMemoryKey(
   chainId: number,

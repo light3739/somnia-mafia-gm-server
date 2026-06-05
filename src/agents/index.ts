@@ -11,6 +11,8 @@
  */
 import { parseEther, type Address, type Hex } from "viem";
 import { getRedis } from "../redis.js";
+import { revealRoomTraces } from "./reveal-trace.js";
+import { buildRevealDeps } from "./reveal-deps.js";
 import { getChainConfig, getRoom, getPlayers } from "../chain.js";
 import { logger } from "../utils/logger.js";
 import { AgentDispatcher } from "./dispatcher.js";
@@ -475,6 +477,11 @@ export async function startAgentSubsystem(store?: GMStore): Promise<void> {
     phaseTimeoutDriver,
     headlessDayDriver,
     sweepAgents: sweepAgentsAfterGame,
+    revealTraces: async (cid: number, roomId: string) => {
+      const r = getRedis();
+      if (!r) return;
+      return revealRoomTraces({ chainId: cid, roomId }, buildRevealDeps(cid, roomId, r));
+    },
   });
   const listener = new AgentEventListener(dispatcher);
   listener.start([...diamondByChain.keys()]);

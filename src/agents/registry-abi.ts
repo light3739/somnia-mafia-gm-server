@@ -35,6 +35,9 @@ export const AGENT_REGISTRY_ABI = parseAbi([
   "function getAgentTraceCommitment(uint256 roomId, bytes32 phaseId, address agent) view returns (bytes32)",
   // Writes
   "function commitAgentInference(uint256 roomId, bytes32 phaseId, bytes32 actionHash, bytes32 traceCommitment)",
+  // Post-game reveal (GM-only, room must be ENDED)
+  "function revealAgentInferenceTrace(uint256 roomId, bytes32 phaseId, address agent, uint256 somniaRequestId, bytes32 promptHash, bytes32 responseHash, bytes32 actionHash, bytes32 salt)",
+  "event AgentInferenceRevealed(uint256 indexed roomId, bytes32 indexed phaseId, address indexed agent, uint256 somniaRequestId, bytes32 promptHash, bytes32 responseHash, bytes32 actionHash)",
   // Events
   "event AgentInferenceCommitted(uint256 indexed roomId, bytes32 indexed phaseId, address indexed agent, bytes32 actionHash, bytes32 traceCommitment)",
   "event AgentRegistered(uint256 indexed roomId, address indexed agent, bytes32 policyHash, bytes32 modelHash, bytes32 metadataHash)",

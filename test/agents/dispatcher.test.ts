@@ -185,6 +185,33 @@ describe("AgentDispatcher", () => {
   });
 });
 
+describe("AgentDispatcher — GAME_ENDED reveal trigger", () => {
+  it("fires revealTraces(chainId, roomId) on GAME_ENDED", async () => {
+    const revealTraces = vi.fn().mockResolvedValue(undefined);
+    const redis2 = new FakeRedis();
+    const dispatcher2 = new AgentDispatcher({
+      redis: redis2 as any,
+      diamondByChain: new Map([[50312, DIAMOND]]),
+      revealTraces,
+    });
+
+    const endedEvent: AgentEvent = {
+      type: "GAME_ENDED",
+      chainId: 50312,
+      roomId: "72",
+      phaseId: "ENDED",
+      winCondition: "TOWN_WIN",
+      blockNumber: 200,
+      txHash: TX_B,
+      logIndex: 0,
+    };
+
+    const out = await dispatcher2.dispatch(endedEvent);
+    expect(out.kind).toBe("dispatched");
+    expect(revealTraces).toHaveBeenCalledWith(50312, "72");
+  });
+});
+
 describe("AgentDispatcher DAY_STARTED routing", () => {
   let redis: FakeRedis;
   beforeEach(() => {

@@ -28,6 +28,8 @@ import {
   sweepRoomAgentFunds,
 } from "../agents/sweep.js";
 import { getRedis } from "../redis.js";
+import { revealRoomTraces } from "../agents/reveal-trace.js";
+import { buildRevealDeps } from "../agents/reveal-deps.js";
 
 /**
  * Routes are registered at boot, BEFORE connectRedis() — so capturing
@@ -148,6 +150,37 @@ export function createAgentRoutes(ctx: AgentRoutesContext) {
       return res.json(result);
     } catch (err: any) {
       logger.error({ err: err?.message ?? err }, "[agents/sweep-room] failed");
+      return res.status(500).json({ error: String(err?.message ?? err) });
+    }
+  });
+
+  // ── POST /agents/reveal-room ─────────────────────────────────────
+  router.post("/agents/reveal-room", ctx.actionLimiter, async (req, res) => {
+    try {
+      const roomIdRaw = req.body?.roomId;
+      if (roomIdRaw == null) {
+        return res.status(400).json({ error: "missing roomId" });
+      }
+      let roomId: bigint;
+      try {
+        roomId = BigInt(roomIdRaw);
+      } catch {
+        return res.status(400).json({ error: "roomId not parseable as bigint" });
+      }
+      const chainId = Number(req.body?.chainId ?? 50312);
+      const chainErr = validateAgentTestnet(chainId);
+      if (chainErr) return res.status(400).json({ error: chainErr });
+
+      const redis = getRedis();
+      if (!redis) {
+        return res.status(503).json({ error: "Redis not connected" });
+      }
+      const lookbackBlocks = req.body?.lookbackBlocks != null ? Number(req.body.lookbackBlocks) : undefined;
+      const deps = buildRevealDeps(chainId, roomId.toString(), redis, lookbackBlocks);
+      const report = await revealRoomTraces({ chainId, roomId: roomId.toString() }, deps);
+      return res.json(report);
+    } catch (err: any) {
+      logger.error({ err: err?.message ?? err }, "[agents/reveal-room] failed");
       return res.status(500).json({ error: String(err?.message ?? err) });
     }
   });

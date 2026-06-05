@@ -51,6 +51,8 @@ export type DispatcherDeps = {
   headlessDayDriver?: HeadlessDayDriver;
   /** Optional: post-game cleanup for leftover native funds on agent EOAs. */
   sweepAgents?: (chainId: number, roomId: string) => void | Promise<void>;
+  /** Optional: post-game reveal of all committed agent inference traces. */
+  revealTraces?: (chainId: number, roomId: string) => Promise<unknown>;
 };
 
 export type DispatchOutcome =
@@ -226,7 +228,15 @@ export class AgentDispatcher {
               )
           );
         }
-        // TODO 4c: dispatch reveal-bundle for all agent traces in this room
+        if (this.deps.revealTraces) {
+          void Promise.resolve(this.deps.revealTraces(event.chainId, event.roomId)).catch(
+            (err) =>
+              logger.error(
+                { err, roomId: event.roomId },
+                "[agents] revealTraces threw"
+              )
+          );
+        }
         break;
     }
 
